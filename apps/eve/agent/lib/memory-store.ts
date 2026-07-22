@@ -1,6 +1,8 @@
 // Long-term memory backed by Supermemory (https://supermemory.ai).
 // Single-user agent, so everything lives under one container tag.
 
+import { swrCache } from "./swr-cache";
+
 const API_BASE = "https://api.supermemory.ai";
 const CONTAINER_TAG = "micky";
 
@@ -74,6 +76,20 @@ interface RawMemoryEntry {
   updatedAt?: string;
 }
 
+// The profile is injected into every turn's instructions; cache it so the
+// Supermemory round-trip stays off the turn's critical path. Writes
+// invalidate it, and Supermemory folds new memories into the profile
+// asynchronously anyway, so a short stale window is invisible.
+const profileCache = swrCache(60_000, async (): Promise<MemoryProfile> => {
+  const result = await api<{ profile?: { static?: string[]; dynamic?: string[] } }>("/v4/profile", "POST", {
+    containerTag: CONTAINER_TAG,
+  });
+  return {
+    static: result.profile?.static ?? [],
+    dynamic: result.profile?.dynamic ?? [],
+  };
+});
+
 export const memoryStore = {
   /** Create a memory directly (immediately searchable). Returns the backing document id. */
   async add(content: string, options?: { permanent?: boolean }): Promise<{ documentId: string }> {
@@ -81,6 +97,7 @@ export const memoryStore = {
       containerTag: CONTAINER_TAG,
       memories: [{ content, isStatic: options?.permanent ?? false }],
     });
+    profileCache.invalidate();
     return { documentId: result.documentId ?? "" };
   },
 
@@ -100,13 +117,7 @@ export const memoryStore = {
 
   /** Auto-maintained user profile: stable facts plus recent context. */
   async profile(): Promise<MemoryProfile> {
-    const result = await api<{ profile?: { static?: string[]; dynamic?: string[] } }>("/v4/profile", "POST", {
-      containerTag: CONTAINER_TAG,
-    });
-    return {
-      static: result.profile?.static ?? [],
-      dynamic: result.profile?.dynamic ?? [],
-    };
+    return await profileCache.get();
   },
 
   /** Every active memory entry, with the ids `delete` needs. */
@@ -132,6 +143,7 @@ export const memoryStore = {
         containerTag: CONTAINER_TAG,
         id: memoryId,
       });
+      profileCache.invalidate();
       return result.forgotten ?? true;
     } catch (error) {
       if (error instanceof SupermemoryError && error.status === 404) return false;
