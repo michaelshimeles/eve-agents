@@ -1679,7 +1679,9 @@ function ModelPicker({
                       aria-pressed={starred}
                       className={cn(
                         "absolute end-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition-opacity hover:text-foreground",
-                        starred ? "text-yellow-500 hover:text-yellow-500" : "opacity-0 group-hover/model:opacity-100",
+                        starred
+                          ? "text-yellow-500 hover:text-yellow-500"
+                          : "text-muted-foreground/40 hover:text-foreground",
                       )}
                       onClick={() => toggleFavorite(option.id)}
                     >
