@@ -567,31 +567,42 @@ function ChatApp() {
 
   // Pull the server's thread list on load: prefer the newer copy of each
   // thread, adopt threads created on other devices, and upload any threads
-  // the server doesn't know about yet.
+  // the server doesn't know about yet. Re-synced on focus and on a slow
+  // interval so proactive threads (fired reminders) show up while the app
+  // stays open.
   useEffect(() => {
-    void fetchServerThreads().then((serverThreads) => {
-      if (!serverThreads) return;
-      const serverIds = new Set(serverThreads.map((thread) => thread.id));
-      for (const thread of indexRef.current.threads) {
-        if (serverIds.has(thread.id)) continue;
-        const chat = loadSavedChat(thread.id);
-        if (chat?.events?.length) putThreadToServer(thread, chat);
-      }
-      setIndex((prev) => {
-        const byId = new Map<string, ThreadMeta>(
-          serverThreads.map((thread) => [thread.id, thread]),
-        );
-        for (const thread of prev.threads) {
-          const existing = byId.get(thread.id);
-          if (!existing || thread.updatedAt > existing.updatedAt) byId.set(thread.id, thread);
+    function syncServerThreads() {
+      void fetchServerThreads().then((serverThreads) => {
+        if (!serverThreads) return;
+        const serverIds = new Set(serverThreads.map((thread) => thread.id));
+        for (const thread of indexRef.current.threads) {
+          if (serverIds.has(thread.id)) continue;
+          const chat = loadSavedChat(thread.id);
+          if (chat?.events?.length) putThreadToServer(thread, chat);
         }
-        const threads = [...byId.values()];
-        const activeId = threads.some((thread) => thread.id === prev.activeId)
-          ? prev.activeId
-          : [...threads].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
-        return { activeId, threads };
+        setIndex((prev) => {
+          const byId = new Map<string, ThreadMeta>(
+            serverThreads.map((thread) => [thread.id, thread]),
+          );
+          for (const thread of prev.threads) {
+            const existing = byId.get(thread.id);
+            if (!existing || thread.updatedAt > existing.updatedAt) byId.set(thread.id, thread);
+          }
+          const threads = [...byId.values()];
+          const activeId = threads.some((thread) => thread.id === prev.activeId)
+            ? prev.activeId
+            : [...threads].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+          return { activeId, threads };
+        });
       });
-    });
+    }
+    syncServerThreads();
+    const timer = setInterval(syncServerThreads, 60_000);
+    window.addEventListener("focus", syncServerThreads);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", syncServerThreads);
+    };
   }, []);
 
   // Resolve the active thread's chat: localStorage first, then the server
