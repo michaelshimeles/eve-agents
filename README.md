@@ -1,6 +1,6 @@
 # eve-agents
 
-A personal AI agent ("Eve") built with the [eve framework](https://eve.dev), served through a Next.js web chat and Telegram. Turborepo monorepo with the agent app in `apps/my-agent`.
+A personal AI agent ("Eve") built with the [eve framework](https://eve.dev), served through a Next.js web chat and Telegram. Turborepo monorepo with the agent app in `apps/eve`.
 
 ## What it does
 
@@ -15,7 +15,7 @@ A personal AI agent ("Eve") built with the [eve framework](https://eve.dev), ser
 ## Structure
 
 ```
-apps/my-agent/
+apps/eve/
   agent/        # eve agent: channels, tools, skills, instructions, extensions
   app/          # Next.js web chat UI + API routes (threads, commands)
   components/   # UI components
@@ -30,14 +30,14 @@ Requires Node 24.
 
 ```bash
 npm install
-npm run dev   # turbo runs next dev for apps/my-agent on localhost:3000
+npm run dev   # turbo runs next dev for apps/eve on localhost:3000
 ```
 
 `next dev` automatically boots the eve agent backend and proxies to it. Wait for `[eve:dev] server listening at ...` before chatting.
 
 ### Environment
 
-Set these in `apps/my-agent/.env.local` (and the Vercel project for production):
+Set these in `apps/eve/.env.local` (and the Vercel project for production):
 
 | Variable | Used for |
 | --- | --- |

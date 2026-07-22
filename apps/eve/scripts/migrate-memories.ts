@@ -1,7 +1,7 @@
 // One-off migration: copy the old blob-backed memories into Supermemory,
 // and set the account's memory filter prompt while we're at it.
 //
-// Run from my-agent/ (needs BLOB_READ_WRITE_TOKEN and SUPERMEMORY_API_KEY):
+// Run from apps/eve/ (needs BLOB_READ_WRITE_TOKEN and SUPERMEMORY_API_KEY):
 //   node --env-file=.env.local scripts/migrate-memories.ts
 
 import { get } from "@vercel/blob";

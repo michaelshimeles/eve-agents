@@ -1,5 +1,5 @@
 {
-  "name": "my-agent",
+  "name": "eve-agent",
   "version": "0.0.0",
   "type": "module",
   "imports": {
