@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 
-const inter = Inter({subsets:['latin'],variable:'--font-sans'});
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 const geist = Geist({
   subsets: ["latin"],
@@ -22,12 +22,16 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0a0a",
+  themeColor: "#111111",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={cn("dark font-sans", geist.variable, geistMono.variable, "font-sans", inter.variable)}>
+    <html
+      lang="en"
+      data-mode="dark"
+      className={cn("font-sans", inter.variable, geist.variable, geistMono.variable)}
+    >
       <body className="antialiased">{children}</body>
     </html>
   );

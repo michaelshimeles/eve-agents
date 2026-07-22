@@ -7,10 +7,10 @@ import {
   useMessageScrollerScrollable,
   useMessageScrollerVisibility,
 } from "@shadcn/react/message-scroller"
+import { Button } from "@cloudflare/kumo"
+import { ArrowDownIcon } from "@phosphor-icons/react"
 
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { ArrowDownIcon } from "lucide-react"
 
 function MessageScrollerProvider(
   props: React.ComponentProps<typeof MessageScrollerPrimitive.Provider>
@@ -87,34 +87,30 @@ function MessageScrollerButton({
   className,
   children,
   render,
-  variant = "secondary",
-  size = "icon-sm",
   ...props
-}: React.ComponentProps<typeof MessageScrollerPrimitive.Button> &
-  Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
+}: React.ComponentProps<typeof MessageScrollerPrimitive.Button>) {
   return (
     <MessageScrollerPrimitive.Button
       data-slot="message-scroller-button"
       data-direction={direction}
-      data-variant={variant}
-      data-size={size}
       direction={direction}
       className={cn(
-        "absolute inset-s-1/2 -translate-x-1/2 border-border bg-background text-foreground transition-[translate,scale,opacity] duration-200 hover:bg-muted hover:text-foreground data-[active=false]:pointer-events-none data-[active=false]:scale-95 data-[active=false]:opacity-0 data-[active=false]:duration-400 data-[active=false]:ease-[cubic-bezier(0.7,0,0.84,0)] data-[active=true]:translate-y-0 data-[active=true]:scale-100 data-[active=true]:opacity-100 data-[active=true]:ease-[cubic-bezier(0.23,1,0.32,1)] data-[direction=end]:bottom-4 data-[direction=end]:data-[active=false]:translate-y-full data-[direction=start]:top-4 data-[direction=start]:data-[active=false]:-translate-y-full rtl:translate-x-1/2 data-[direction=start]:[&_svg]:rotate-180",
+        "absolute inset-s-1/2 -translate-x-1/2 transition-[translate,scale,opacity] duration-200 data-[active=false]:pointer-events-none data-[active=false]:scale-95 data-[active=false]:opacity-0 data-[active=false]:duration-400 data-[active=false]:ease-[cubic-bezier(0.7,0,0.84,0)] data-[active=true]:translate-y-0 data-[active=true]:scale-100 data-[active=true]:opacity-100 data-[active=true]:ease-[cubic-bezier(0.23,1,0.32,1)] data-[direction=end]:bottom-4 data-[direction=end]:data-[active=false]:translate-y-full data-[direction=start]:top-4 data-[direction=start]:data-[active=false]:-translate-y-full rtl:translate-x-1/2 data-[direction=start]:[&_svg]:rotate-180",
         className
       )}
-      render={render ?? <Button variant={variant} size={size} />}
+      render={
+        render ?? (
+          <Button
+            variant="secondary"
+            shape="circle"
+            size="sm"
+            aria-label={direction === "end" ? "Scroll to end" : "Scroll to start"}
+          />
+        )
+      }
       {...props}
     >
-      {children ?? (
-        <>
-          <ArrowDownIcon
-          />
-          <span className="sr-only">
-            {direction === "end" ? "Scroll to end" : "Scroll to start"}
-          </span>
-        </>
-      )}
+      {children ?? <ArrowDownIcon aria-hidden />}
     </MessageScrollerPrimitive.Button>
   )
 }

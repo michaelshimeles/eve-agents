@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon } from "@phosphor-icons/react";
 import { useRef, useState, type ComponentProps } from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRemarkPlugins, Streamdown, type Components } from "streamdown";
@@ -25,7 +25,7 @@ function CodeBlock({ children, ...props }: ComponentProps<"pre">) {
       <button
         type="button"
         aria-label="Copy code"
-        className="not-typeset absolute end-2 top-2 rounded-md border border-border bg-background/80 p-1.5 text-muted-foreground opacity-0 backdrop-blur-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/code:opacity-100"
+        className="not-typeset absolute end-2 top-2 rounded-md bg-kumo-base/80 p-1.5 text-kumo-subtle ring ring-kumo-hairline opacity-0 backdrop-blur-sm transition-opacity hover:text-kumo-default focus-visible:opacity-100 group-hover/code:opacity-100"
         onClick={() => {
           const text = preRef.current?.innerText ?? "";
           void navigator.clipboard.writeText(text).then(() => {

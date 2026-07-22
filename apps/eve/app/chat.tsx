@@ -4,43 +4,33 @@ import type { UserContent } from "ai";
 import type { HandleMessageStreamEvent, SessionState } from "eve/client";
 import { useEveAgent } from "eve/react";
 import type { EveMessage, EveMessagePart } from "eve/react";
+import { Button, Dialog, Input, InputArea, LinkButton, Loader } from "@cloudflare/kumo";
 import {
+  ArrowClockwiseIcon,
   ArrowUpIcon,
+  CaretDownIcon,
   CheckIcon,
-  ChevronDownIcon,
   CopyIcon,
-  ExternalLinkIcon,
   FileIcon,
-  KeyRoundIcon,
-  MicIcon,
-  PanelLeftIcon,
+  MagnifyingGlassIcon,
+  KeyIcon,
+  MicrophoneIcon,
   PaperclipIcon,
-  PencilIcon,
-  PinIcon,
-  PinOffIcon,
+  PencilSimpleIcon,
   PlusIcon,
-  RefreshCwIcon,
-  SearchIcon,
-  SparklesIcon,
-  SquareIcon,
+  PushPinIcon,
+  PushPinSlashIcon,
+  SidebarSimpleIcon,
+  SparkleIcon,
   StarIcon,
-  Trash2Icon,
+  StopIcon,
+  TrashIcon,
   WrenchIcon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Markdown } from "@/components/markdown";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import {
   Attachment,
   AttachmentAction,
@@ -53,7 +43,6 @@ import {
   AttachmentTrigger,
 } from "@/components/ui/attachment";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
-import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Message, MessageContent } from "@/components/ui/message";
 import {
@@ -64,8 +53,6 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 const THREADS_KEY = "eve-web-threads";
@@ -382,18 +369,18 @@ function CopyButton({ text, label = "Copy message" }: { text: string; label?: st
   return (
     <Button
       variant="ghost"
-      size="icon-xs"
+      size="xs"
+      shape="square"
       aria-label={label}
-      className="text-muted-foreground hover:text-foreground"
+      icon={copied ? CheckIcon : CopyIcon}
+      className="text-kumo-subtle"
       onClick={() => {
         void navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         });
       }}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </Button>
+    />
   );
 }
 
@@ -407,10 +394,10 @@ function ToolPayload({ label, value }: { label: string; value: unknown }) {
   if (!text || text === "{}" || text === "undefined") return null;
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+      <span className="text-[10px] font-medium tracking-wide text-kumo-subtle uppercase">
         {label}
       </span>
-      <pre className="max-h-64 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs break-words whitespace-pre-wrap text-muted-foreground">
+      <pre className="max-h-64 overflow-auto rounded-md bg-kumo-recessed p-2 font-mono text-xs break-words whitespace-pre-wrap text-kumo-subtle">
         {text}
       </pre>
     </div>
@@ -483,7 +470,7 @@ export function Chat() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) {
-    return <main className="h-dvh bg-background" />;
+    return <main className="h-dvh bg-kumo-canvas" />;
   }
   return <ChatApp />;
 }
@@ -745,31 +732,37 @@ function ChatApp() {
 
       <aside
         className={cn(
-          "fixed inset-y-0 start-0 z-40 flex w-64 shrink-0 -translate-x-full flex-col border-e bg-sidebar text-sidebar-foreground transition-transform duration-200 md:static md:translate-x-0",
+          "fixed inset-y-0 start-0 z-40 flex w-64 shrink-0 -translate-x-full flex-col border-e border-kumo-hairline bg-kumo-elevated transition-transform duration-200 md:static md:translate-x-0",
           sidebarOpen && "translate-x-0",
         )}
       >
-        <div className="flex items-center justify-between px-3 py-3">
-          <span className="text-sm font-semibold tracking-tight">Eve</span>
-          <Button variant="ghost" size="icon-sm" aria-label="New thread" onClick={newThread}>
-            <PlusIcon />
-          </Button>
+        <div className="flex items-center justify-between px-3 py-2.5">
+          <span className="text-sm font-semibold">Eve</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={PlusIcon}
+            aria-label="New thread"
+            title="New thread"
+            onClick={newThread}
+          />
         </div>
         <div className="px-2 pb-2">
-          <div className="flex items-center gap-1.5 rounded-md border bg-background px-2 transition-colors focus-within:border-ring">
-            <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-            <input
+          <div className="relative">
+            <Input
+              size="sm"
               value={searchQuery}
               placeholder="Search threads"
               aria-label="Search threads"
-              className="h-8 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="w-full pe-7 ring-kumo-hairline"
               onChange={(event) => setSearchQuery(event.target.value)}
             />
             {searchQuery.length > 0 && (
               <button
                 type="button"
                 aria-label="Clear search"
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="absolute end-1.5 top-1/2 -translate-y-1/2 text-kumo-subtle hover:text-kumo-default"
                 onClick={() => setSearchQuery("")}
               >
                 <XIcon className="size-3.5" />
@@ -779,12 +772,12 @@ function ChatApp() {
         </div>
         <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {sections.every((section) => section.threads.length === 0) && (
-            <p className="px-2.5 py-2 text-xs text-muted-foreground">No threads match.</p>
+            <p className="px-2.5 py-2 text-xs text-kumo-subtle">No threads match.</p>
           )}
           {sections.map((section) => (
             <div key={section.label ?? "results"} className="pb-2">
               {section.label && (
-                <p className="px-2.5 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground">
+                <p className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-kumo-subtle">
                   {section.label}
                 </p>
               )}
@@ -829,34 +822,39 @@ function ChatApp() {
           onModelChange={selectModel}
         />
       ) : (
-        <main className="flex h-dvh min-w-0 flex-1 items-center justify-center">
-          <Spinner className="text-muted-foreground" />
+        <main className="flex h-dvh min-w-0 flex-1 items-center justify-center text-kumo-subtle">
+          <Loader size={20} />
         </main>
       )}
 
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete thread?</AlertDialogTitle>
-            <AlertDialogDescription>
-              &ldquo;{threadToDelete?.title}&rdquo; and its local history will be removed. This
-              can&rsquo;t be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
+      <Dialog.Root open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <Dialog size="sm" className="p-6">
+          <Dialog.Title>Delete thread?</Dialog.Title>
+          <Dialog.Description className="mt-2 text-kumo-subtle">
+            &ldquo;{threadToDelete?.title}&rdquo; and its local history will be removed. This
+            can&rsquo;t be undone.
+          </Dialog.Description>
+          <div className="mt-6 flex justify-end gap-2">
+            <Dialog.Close
+              render={(props) => (
+                <Button variant="secondary" size="sm" {...props}>
+                  Cancel
+                </Button>
+              )}
+            />
+            <Button
               variant="destructive"
+              size="sm"
               onClick={() => {
                 if (threadToDelete) deleteThread(threadToDelete.id);
                 setDeleteDialogOpen(false);
               }}
             >
               Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </div>
+        </Dialog>
+      </Dialog.Root>
     </div>
   );
 }
@@ -895,7 +893,7 @@ function SidebarThread({
           autoFocus
           defaultValue={thread.title}
           aria-label="Thread title"
-          className="w-full rounded-md bg-sidebar-accent px-2.5 py-2 text-sm text-sidebar-accent-foreground outline-none ring-1 ring-ring"
+          className="w-full rounded-md bg-kumo-base px-2.5 py-2 text-sm text-kumo-default ring ring-kumo-focus outline-none"
           onFocus={(event) => event.currentTarget.select()}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
@@ -923,49 +921,49 @@ function SidebarThread({
         type="button"
         onClick={onSelect}
         className={cn(
-          "w-full rounded-md px-2.5 py-2 pe-8 text-start transition-colors group-hover/thread:bg-sidebar-accent",
-          active && "bg-sidebar-accent text-sidebar-accent-foreground",
+          "w-full rounded-md px-2.5 py-1.5 pe-8 text-start group-hover/thread:bg-kumo-tint",
+          active && "bg-kumo-tint text-kumo-strong",
         )}
       >
         <span className="relative flex items-center">
           {busy && (
             <span
-              className="absolute -start-1 size-1.5 shrink-0 -translate-x-full animate-pulse rounded-full bg-primary rtl:translate-x-full"
+              className="absolute -start-1 size-1.5 shrink-0 -translate-x-full animate-pulse rounded-full bg-kumo-brand rtl:translate-x-full"
               role="status"
               aria-label="Turn in progress"
             />
           )}
           <span className="truncate text-sm">{thread.title}</span>
         </span>
-        <span className="block text-xs text-muted-foreground">
+        <span className="block text-xs text-kumo-subtle">
           {formatThreadDate(thread.updatedAt)}
         </span>
       </button>
-      <div className="absolute end-1 top-1/2 flex -translate-y-1/2 items-center rounded-md bg-sidebar-accent opacity-0 transition-opacity focus-within:opacity-100 group-hover/thread:opacity-100">
+      <div className="absolute end-1 top-1/2 flex -translate-y-1/2 items-center rounded-md bg-kumo-tint opacity-0 focus-within:opacity-100 group-hover/thread:opacity-100">
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="sm"
+          shape="square"
+          icon={thread.pinned ? PushPinSlashIcon : PushPinIcon}
           aria-label={thread.pinned ? `Unpin ${thread.title}` : `Pin ${thread.title}`}
           onClick={onTogglePin}
-        >
-          {thread.pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
-        </Button>
+        />
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="sm"
+          shape="square"
+          icon={PencilSimpleIcon}
           aria-label={`Rename ${thread.title}`}
           onClick={onStartRename}
-        >
-          <PencilIcon className="size-3.5" />
-        </Button>
+        />
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="sm"
+          shape="square"
+          icon={TrashIcon}
           aria-label={`Delete ${thread.title}`}
           onClick={onDelete}
-        >
-          <Trash2Icon className="size-3.5" />
-        </Button>
+        />
       </div>
     </li>
   );
@@ -1242,8 +1240,8 @@ function ChatThread({
       }}
     >
       {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="flex items-center gap-2 rounded-xl border-2 border-dashed border-ring px-8 py-6 text-sm font-medium">
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-kumo-canvas/80 backdrop-blur-sm">
+          <div className="flex items-center gap-2 rounded-xl border-2 border-dashed border-kumo-interact px-8 py-6 text-sm font-medium">
             <PaperclipIcon className="size-4" />
             Drop files to attach
           </div>
@@ -1252,22 +1250,22 @@ function ChatThread({
       <div className="mx-auto flex size-full max-w-3xl min-h-0 flex-col px-4">
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="sm"
+          shape="square"
+          icon={SidebarSimpleIcon}
           className="absolute start-2 top-2 z-20 md:hidden"
           aria-label="Open threads"
           onClick={onOpenSidebar}
-        >
-          <PanelLeftIcon />
-        </Button>
+        />
 
         <MessageScrollerProvider autoScroll>
           <MessageScroller className="flex-1">
             <MessageScrollerViewport className="[scrollbar-width:none]! [&::-webkit-scrollbar]:hidden">
               <MessageScrollerContent className="gap-5 py-6">
                 {!hasMessages && (
-                  <div className="flex flex-1 flex-col items-center justify-center gap-1.5 text-center">
-                    <p className="text-xl font-semibold">Hey Micky.</p>
-                    <p className="max-w-sm text-sm text-muted-foreground">
+                  <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+                    <h2 className="text-lg font-semibold text-kumo-default">Hey Micky</h2>
+                    <p className="max-w-sm text-sm text-kumo-subtle">
                       Ask me anything — I have your memory, a browser, and all your connected apps.
                     </p>
                   </div>
@@ -1296,7 +1294,7 @@ function ChatThread({
                   <MessageScrollerItem messageId="thinking">
                     <Marker role="status">
                       <MarkerIcon>
-                        <Spinner />
+                        <Loader size={14} />
                       </MarkerIcon>
                       <MarkerContent className="shimmer">Thinking...</MarkerContent>
                     </Marker>
@@ -1320,9 +1318,9 @@ function ChatThread({
             <div
               role="listbox"
               aria-label="Commands"
-              className="absolute inset-x-0 bottom-full z-20 mb-1 overflow-hidden rounded-xl border bg-popover shadow-lg"
+              className="absolute inset-x-0 bottom-full z-20 mb-1 overflow-hidden rounded-lg bg-kumo-base shadow-lg ring ring-kumo-line"
             >
-              <p className="px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground">
+              <p className="px-3 pt-2 pb-1 text-[11px] font-medium text-kumo-subtle">
                 Commands
               </p>
               <div className="max-h-64 overflow-y-auto pb-1">
@@ -1333,8 +1331,8 @@ function ChatThread({
                     role="option"
                     aria-selected={commandIndex === activePaletteIndex}
                     className={cn(
-                      "flex w-full items-baseline gap-2 px-3 py-2 text-start text-sm transition-colors",
-                      commandIndex === activePaletteIndex && "bg-accent text-accent-foreground",
+                      "flex w-full items-baseline gap-2 px-3 py-2 text-start text-sm",
+                      commandIndex === activePaletteIndex && "bg-kumo-tint text-kumo-strong",
                     )}
                     // Keep the textarea focused; the click still fires.
                     onMouseDown={(event) => event.preventDefault()}
@@ -1342,7 +1340,7 @@ function ChatThread({
                     onClick={() => applyCommand(command)}
                   >
                     <span className="shrink-0 font-mono text-xs font-medium">/{command.name}</span>
-                    <span className="truncate text-xs text-muted-foreground">
+                    <span className="truncate text-xs text-kumo-subtle">
                       {command.description}
                     </span>
                   </button>
@@ -1351,7 +1349,7 @@ function ChatThread({
             </div>
           )}
           <form
-            className="rounded-2xl border bg-card p-2 transition-colors focus-within:border-ring"
+            className="rounded-xl bg-kumo-base p-2 ring ring-kumo-hairline focus-within:ring-kumo-focus/40"
             onSubmit={(event) => {
               event.preventDefault();
               sendDraft();
@@ -1380,122 +1378,127 @@ function ChatThread({
                     <AttachmentActions>
                       <AttachmentAction
                         aria-label={`Remove ${attachment.name}`}
+                        icon={XIcon}
                         onClick={() => removeAttachment(attachment.id)}
-                      >
-                        <XIcon />
-                      </AttachmentAction>
+                      />
                     </AttachmentActions>
                   </Attachment>
                 ))}
               </AttachmentGroup>
             )}
-            <div className="flex items-end gap-2 ps-2">
-              <ModelPicker model={model} models={models} onSelect={onModelChange} />
-              <Textarea
-                ref={composerRef}
-                value={draft}
-                placeholder="Message Eve... (/ for commands)"
-                rows={1}
-                className="max-h-44 min-h-0 resize-none border-0 bg-transparent p-0 py-1.5 shadow-none [field-sizing:content] focus-visible:ring-0 dark:bg-transparent"
-                onChange={(event) => {
-                  setDraft(event.target.value);
-                  setPaletteDismissed(false);
-                }}
-                onPaste={(event) => {
-                  if (event.clipboardData.files.length === 0) return;
-                  event.preventDefault();
-                  void addFiles(event.clipboardData.files);
-                }}
-                onKeyDown={(event) => {
-                  if (paletteOpen) {
-                    if (event.key === "ArrowDown") {
-                      event.preventDefault();
-                      setPaletteIndex((activePaletteIndex + 1) % paletteCommands.length);
-                      return;
-                    }
-                    if (event.key === "ArrowUp") {
-                      event.preventDefault();
-                      setPaletteIndex(
-                        (activePaletteIndex - 1 + paletteCommands.length) %
-                          paletteCommands.length,
-                      );
-                      return;
-                    }
-                    if (event.key === "Enter" || event.key === "Tab") {
-                      event.preventDefault();
-                      applyCommand(paletteCommands[activePaletteIndex]);
-                      return;
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      setPaletteDismissed(true);
-                      return;
-                    }
-                  }
-                  if (event.key === "Enter" && !event.shiftKey) {
+            <InputArea
+              ref={composerRef}
+              value={draft}
+              aria-label="Message Eve"
+              placeholder="Message Eve... (/ for commands)"
+              autoResize
+              minRows={1}
+              maxRows={7}
+              className="w-full rounded-none bg-transparent px-1 text-sm ring-0 focus:ring-0"
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setPaletteDismissed(false);
+              }}
+              onPaste={(event) => {
+                if (event.clipboardData.files.length === 0) return;
+                event.preventDefault();
+                void addFiles(event.clipboardData.files);
+              }}
+              onKeyDown={(event) => {
+                if (paletteOpen) {
+                  if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    sendDraft();
+                    setPaletteIndex((activePaletteIndex + 1) % paletteCommands.length);
+                    return;
                   }
-                }}
-              />
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                hidden
-                onChange={(event) => {
-                  if (event.target.files) void addFiles(event.target.files);
-                  event.target.value = "";
-                }}
-              />
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setPaletteIndex(
+                      (activePaletteIndex - 1 + paletteCommands.length) %
+                        paletteCommands.length,
+                    );
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === "Tab") {
+                    event.preventDefault();
+                    applyCommand(paletteCommands[activePaletteIndex]);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setPaletteDismissed(true);
+                    return;
+                  }
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  sendDraft();
+                }
+              }}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(event) => {
+                if (event.target.files) void addFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <div className="mt-1 flex items-center gap-1">
               <Button
                 type="button"
-                size="icon"
                 variant="ghost"
+                shape="square"
+                icon={PlusIcon}
                 aria-label="Attach files"
-                className="text-muted-foreground hover:text-foreground"
+                title="Attach files"
+                className="text-kumo-subtle"
                 onClick={() => fileInputRef.current?.click()}
-              >
-                <PaperclipIcon />
-              </Button>
-              {speechSupported && (
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  aria-label={listening ? "Stop voice input" : "Start voice input"}
-                  className={cn(
-                    "text-muted-foreground hover:text-foreground",
-                    listening && "animate-pulse text-red-500 hover:text-red-500",
-                  )}
-                  onClick={toggleVoice}
-                >
-                  <MicIcon />
-                </Button>
-              )}
-              {isBusy ? (
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="secondary"
-                  aria-label="Stop"
-                  onClick={() => void stopTurn()}
-                >
-                  <SquareIcon className="size-3.5 fill-current" />
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  size="icon"
-                  aria-label="Send"
-                  disabled={draft.trim().length === 0 && attachments.length === 0}
-                >
-                  <ArrowUpIcon />
-                </Button>
-              )}
+              />
+              <div className="ms-auto flex items-center gap-1">
+                <ModelPicker model={model} models={models} onSelect={onModelChange} />
+                {speechSupported && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    shape="circle"
+                    icon={
+                      listening ? <MicrophoneIcon weight="fill" /> : <MicrophoneIcon />
+                    }
+                    aria-label={listening ? "Stop voice input" : "Start voice input"}
+                    title={listening ? "Stop voice input" : "Start voice input"}
+                    className={cn(
+                      "text-kumo-subtle",
+                      listening && "animate-pulse !text-kumo-danger",
+                    )}
+                    onClick={toggleVoice}
+                  />
+                )}
+                {isBusy ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    shape="circle"
+                    icon={<StopIcon weight="fill" />}
+                    aria-label="Stop"
+                    onClick={() => void stopTurn()}
+                  />
+                ) : (
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    shape="circle"
+                    icon={ArrowUpIcon}
+                    aria-label="Send"
+                    disabled={draft.trim().length === 0 && attachments.length === 0}
+                  />
+                )}
+              </div>
             </div>
           </form>
-          <p className="h-6 pt-2 text-center text-[11px] text-muted-foreground">
+          <p className="h-6 pt-2 text-center text-[11px] text-kumo-subtle">
             {threadUsage.inputTokens > 0 ? `${formatUsage(threadUsage)} this thread` : "\u00A0"}
           </p>
         </footer>
@@ -1567,25 +1570,25 @@ function ModelPicker({
         variant="ghost"
         aria-label="Select model"
         aria-expanded={open}
-        className="max-w-40 text-muted-foreground hover:text-foreground"
+        className="max-w-40 text-kumo-subtle hover:text-kumo-default"
         onClick={() => {
           setOpen((prev) => !prev);
           setQuery("");
         }}
       >
         <span className="truncate">{label}</span>
-        <ChevronDownIcon data-icon="inline-end" />
+        <CaretDownIcon className="size-3 shrink-0" />
       </Button>
       {open && (
-        <div className="absolute bottom-full start-0 z-30 mb-2 flex w-[26rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-md">
-          <div className="flex items-center gap-2 border-b px-3 py-2">
-            <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+        <div className="absolute bottom-full end-0 z-30 mb-2 flex w-[26rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-kumo-base shadow-lg ring ring-kumo-line">
+          <div className="flex items-center gap-2 border-b border-kumo-hairline px-3 py-2">
+            <MagnifyingGlassIcon className="size-4 shrink-0 text-kumo-subtle" />
             <input
               autoFocus
               value={query}
               placeholder="Search models..."
               aria-label="Search models"
-              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-kumo-placeholder"
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") setOpen(false);
@@ -1596,7 +1599,7 @@ function ModelPicker({
             <div
               role="tablist"
               aria-label="Filter by provider"
-              className="flex max-h-80 w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-e p-1.5"
+              className="flex max-h-80 w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-e border-kumo-hairline p-1.5"
             >
               <button
                 type="button"
@@ -1605,8 +1608,8 @@ function ModelPicker({
                 aria-label="Favorites"
                 title="Favorites"
                 className={cn(
-                  "flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
-                  providerFilter === "favorites" && "bg-accent text-accent-foreground",
+                  "flex size-8 shrink-0 items-center justify-center rounded-lg text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default",
+                  providerFilter === "favorites" && "bg-kumo-tint text-kumo-strong",
                 )}
                 onClick={() =>
                   setProviderFilter((prev) => (prev === "favorites" ? null : "favorites"))
@@ -1623,8 +1626,8 @@ function ModelPicker({
                   aria-label={provider}
                   title={provider}
                   className={cn(
-                    "flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold uppercase text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
-                    providerFilter === provider && "bg-accent text-accent-foreground",
+                    "flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold uppercase text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default",
+                    providerFilter === provider && "bg-kumo-tint text-kumo-strong",
                   )}
                   onClick={() =>
                     setProviderFilter((prev) => (prev === provider ? null : provider))
@@ -1636,7 +1639,7 @@ function ModelPicker({
             </div>
             <div role="listbox" aria-label="Models" className="max-h-80 min-w-0 flex-1 overflow-y-auto p-1.5">
               {filtered.length === 0 && (
-                <p className="px-2 py-2 text-xs text-muted-foreground">
+                <p className="px-2 py-2 text-xs text-kumo-subtle">
                   {models.length === 0
                     ? "Model list unavailable."
                     : providerFilter === "favorites" && favorites.length === 0
@@ -1650,7 +1653,7 @@ function ModelPicker({
                 return (
                   <div
                     key={option.id}
-                    className="group/model relative rounded-lg transition-colors hover:bg-accent"
+                    className="group/model relative rounded-lg transition-colors hover:bg-kumo-tint"
                   >
                     <button
                       type="button"
@@ -1665,11 +1668,11 @@ function ModelPicker({
                       <span className="flex items-center gap-1.5">
                         <span className="truncate text-sm font-medium">{option.name}</span>
                         {tier && (
-                          <span className="shrink-0 text-[11px] text-muted-foreground">{tier}</span>
+                          <span className="shrink-0 text-[11px] text-kumo-subtle">{tier}</span>
                         )}
                         {option.id === model && <CheckIcon className="size-3.5 shrink-0" />}
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
+                      <span className="block truncate text-xs text-kumo-subtle">
                         {option.description || option.id}
                       </span>
                     </button>
@@ -1678,14 +1681,14 @@ function ModelPicker({
                       aria-label={starred ? `Unfavorite ${option.name}` : `Favorite ${option.name}`}
                       aria-pressed={starred}
                       className={cn(
-                        "absolute end-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition-opacity hover:text-foreground",
+                        "absolute end-2 top-1/2 -translate-y-1/2 rounded p-1 transition-opacity",
                         starred
                           ? "text-yellow-500 hover:text-yellow-500"
-                          : "text-muted-foreground/40 hover:text-foreground",
+                          : "text-kumo-inactive hover:text-kumo-default",
                       )}
                       onClick={() => toggleFavorite(option.id)}
                     >
-                      <StarIcon className={cn("size-4", starred && "fill-current")} />
+                      <StarIcon className="size-4" weight={starred ? "fill" : "regular"} />
                     </button>
                   </div>
                 );
@@ -1729,7 +1732,7 @@ function ChatMessage({
           <div className={cn(actionRowClass, !assistantDone && "invisible")}>
             <CopyButton text={text} />
             {usage && (
-              <span className="text-[11px] text-muted-foreground">{formatUsage(usage)}</span>
+              <span className="text-[11px] text-kumo-subtle">{formatUsage(usage)}</span>
             )}
           </div>
         )}
@@ -1738,22 +1741,22 @@ function ChatMessage({
             <CopyButton text={text} />
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="xs"
+              shape="square"
+              icon={PencilSimpleIcon}
               aria-label="Edit and resend"
-              className="text-muted-foreground hover:text-foreground"
+              className="text-kumo-subtle"
               onClick={() => onEdit(text)}
-            >
-              <PencilIcon />
-            </Button>
+            />
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="xs"
+              shape="square"
+              icon={ArrowClockwiseIcon}
               aria-label="Retry"
-              className="text-muted-foreground hover:text-foreground"
+              className="text-kumo-subtle"
               onClick={() => onRetry(text)}
-            >
-              <RefreshCwIcon />
-            </Button>
+            />
           </div>
         )}
       </MessageContent>
@@ -1793,11 +1796,11 @@ function ChatPart({
       if (part.text.trim().length === 0) return null;
       return (
         <details className="group/reasoning">
-          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
-            <SparklesIcon className="size-3" aria-hidden />
+          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 text-xs text-kumo-subtle hover:text-kumo-default [&::-webkit-details-marker]:hidden">
+            <SparkleIcon className="size-3" aria-hidden />
             Reasoning
           </summary>
-          <p className="mt-2 whitespace-pre-wrap border-s-2 ps-3 text-xs text-muted-foreground">
+          <p className="mt-2 whitespace-pre-wrap border-s-2 border-kumo-hairline ps-3 text-xs text-kumo-subtle">
             {part.text}
           </p>
         </details>
@@ -1838,7 +1841,7 @@ function ChatPart({
         <Marker role={running ? "status" : undefined}>
           <MarkerIcon>
             {running ? (
-              <Spinner />
+              <Loader size={14} />
             ) : part.state === "output-error" || part.state === "output-denied" ? (
               <XIcon />
             ) : part.state === "output-available" ? (
@@ -1855,10 +1858,10 @@ function ChatPart({
         <div className="flex flex-col gap-2">
           {expandable ? (
             <details>
-              <summary className="w-fit cursor-pointer list-none rounded-md transition-colors hover:brightness-125 [&::-webkit-details-marker]:hidden">
+              <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
                 {marker}
               </summary>
-              <div className="mt-2 flex flex-col gap-2 border-s-2 ps-3">
+              <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
                 <ToolPayload label="Input" value={part.input} />
                 {part.state === "output-available" && (
                   <ToolPayload label="Output" value={part.output} />
@@ -1887,7 +1890,7 @@ function ChatPart({
                           option.style === "danger"
                             ? "destructive"
                             : option.style === "primary"
-                              ? "default"
+                              ? "primary"
                               : "secondary"
                         }
                         onClick={() => onRespond(request.requestId, option.id)}
@@ -1924,26 +1927,26 @@ function ChatPart({
           <BubbleContent>
             <div className="flex flex-col gap-3">
               <div className="flex items-center gap-2 text-sm font-medium">
-                <KeyRoundIcon className="size-4 text-muted-foreground" aria-hidden />
+                <KeyIcon className="size-4 text-kumo-subtle" aria-hidden />
                 {part.displayName}
               </div>
-              <p className="text-sm text-muted-foreground">{part.description}</p>
+              <p className="text-sm text-kumo-subtle">{part.description}</p>
               {part.authorization?.userCode && (
-                <code className="w-fit rounded-md bg-muted px-2.5 py-1 font-mono text-sm tracking-widest">
+                <code className="w-fit rounded-md bg-kumo-tint px-2.5 py-1 font-mono text-sm tracking-widest">
                   {part.authorization.userCode}
                 </code>
               )}
               {part.authorization?.url && (
-                <Button
+                <LinkButton
+                  href={part.authorization.url}
+                  target="_blank"
+                  variant="primary"
                   size="sm"
+                  external
                   className="w-fit"
-                  render={
-                    <a href={part.authorization.url} target="_blank" rel="noreferrer" />
-                  }
                 >
                   Sign in
-                  <ExternalLinkIcon />
-                </Button>
+                </LinkButton>
               )}
             </div>
           </BubbleContent>
