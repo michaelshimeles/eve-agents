@@ -13,6 +13,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@vercel/blob": "^2.6.1",
     "@vercel/connect": "0.4.0",
     "ai": "^7.0.26",
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "24.x",
+    "microsandbox": "^0.5.10",
     "typescript": "7.0.2"
   },
   "overrides": {
