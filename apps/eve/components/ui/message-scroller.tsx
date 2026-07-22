@@ -72,10 +72,11 @@ function MessageScrollerItem({
     <MessageScrollerPrimitive.Item
       data-slot="message-scroller-item"
       scrollAnchor={scrollAnchor}
-      className={cn(
-        "min-w-0 shrink-0 [contain-intrinsic-size:auto_10rem] [content-visibility:auto]",
-        className
-      )}
+      // content-visibility:auto is deliberately not used here: skipped items
+      // repaint with a visible flash when scrolled back into view, and their
+      // estimated intrinsic size makes the scroll position jump while a
+      // reply streams.
+      className={cn("min-w-0 shrink-0", className)}
       {...props}
     />
   )
