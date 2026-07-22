@@ -1,6 +1,7 @@
 import { defineSchedule } from "eve/schedules";
 
 import telegram from "../channels/telegram";
+import { recordAutomationRun } from "../lib/runs-db";
 import { deliverToWebChatThread } from "../lib/web-thread-delivery";
 import { claimDueReminders, completeReminder, releaseReminder, type ReminderRow } from "../lib/reminders-db";
 
@@ -33,6 +34,7 @@ export default defineSchedule({
       waitUntil(
         (async () => {
           try {
+            let threadId: string | undefined;
             if (reminder.chat_id !== null) {
               await receive(telegram, {
                 message: reminderMessage(reminder),
@@ -40,12 +42,28 @@ export default defineSchedule({
                 auth: appAuth,
               });
             } else {
-              await deliverToWebChatThread(`Reminder: ${reminder.prompt}`, reminderMessage(reminder));
+              threadId = await deliverToWebChatThread(
+                `Reminder: ${reminder.prompt}`,
+                reminderMessage(reminder),
+                "reminder",
+              );
             }
             await completeReminder(reminder);
+            await recordAutomationRun({
+              kind: "reminder",
+              automationId: reminder.id,
+              status: "ok",
+              threadId,
+            });
           } catch (error) {
             console.error(`Reminder ${reminder.id} delivery failed; releasing for retry.`, error);
             await releaseReminder(reminder.id);
+            await recordAutomationRun({
+              kind: "reminder",
+              automationId: reminder.id,
+              status: "error",
+              error: error instanceof Error ? error.message : String(error),
+            }).catch(() => undefined);
           }
         })(),
       );

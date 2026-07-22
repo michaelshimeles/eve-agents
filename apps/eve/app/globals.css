@@ -32,3 +32,14 @@
     @apply bg-kumo-canvas text-kumo-default font-sans;
   }
 }
+
+/* Kumo portals its dialog popup and backdrop with no z-index, so fixed app
+   chrome with a z-index (the z-40 sidebar) paints over them. Lift the
+   overlay layers above everything. */
+@layer components {
+  [role="dialog"].fixed,
+  [role="alertdialog"].fixed,
+  [role="presentation"].fixed.inset-0 {
+    z-index: 50;
+  }
+}

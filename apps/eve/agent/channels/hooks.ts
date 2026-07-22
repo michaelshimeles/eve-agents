@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { defineChannel, POST } from "eve/channels";
 
+import { recordAutomationRun } from "../lib/runs-db";
 import { deliverToWebChatThread } from "../lib/web-thread-delivery";
 import { getWebhook, recordWebhookFire, type WebhookRow } from "../lib/webhooks-db";
 import telegram from "./telegram";
@@ -62,6 +63,7 @@ export default defineChannel({
       waitUntil(
         (async () => {
           try {
+            let threadId: string | undefined;
             if (hook.chat_id !== null) {
               await receive(telegram, {
                 message,
@@ -74,10 +76,22 @@ export default defineChannel({
                 },
               });
             } else {
-              await deliverToWebChatThread(`Webhook: ${hook.name}`, message);
+              threadId = await deliverToWebChatThread(`Webhook: ${hook.name}`, message, "webhook");
             }
+            await recordAutomationRun({
+              kind: "webhook",
+              automationId: hook.id,
+              status: "ok",
+              threadId,
+            });
           } catch (error) {
             console.error(`Webhook ${hook.id} processing failed.`, error);
+            await recordAutomationRun({
+              kind: "webhook",
+              automationId: hook.id,
+              status: "error",
+              error: error instanceof Error ? error.message : String(error),
+            }).catch(() => undefined);
           }
         })(),
       );
