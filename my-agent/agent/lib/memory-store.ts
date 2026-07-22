@@ -1,51 +1,141 @@
-import { get, put } from "@vercel/blob";
+// Long-term memory backed by Supermemory (https://supermemory.ai).
+// Single-user agent, so everything lives under one container tag.
 
-export interface Memory {
-  key: string;
-  value: string;
-  updatedAt: string;
+const API_BASE = "https://api.supermemory.ai";
+const CONTAINER_TAG = "micky";
+
+export interface MemoryProfile {
+  static: string[];
+  dynamic: string[];
 }
 
-// All long-term memories live in one private JSON blob. Single-user agent,
-// so no tenant scoping and no contention concerns.
-const BLOB_PATH = "memory/memories.json";
-
-async function readAll(): Promise<Record<string, Memory>> {
-  // useCache: false — reads must see the latest write, not the CDN copy.
-  const result = await get(BLOB_PATH, { access: "private", useCache: false });
-  if (result === null || result.stream === null) return {};
-  const text = await new Response(result.stream).text();
-  return JSON.parse(text) as Record<string, Memory>;
+export interface MemorySearchResult {
+  id: string;
+  content: string;
+  similarity: number;
+  updatedAt: string | null;
 }
 
-async function writeAll(memories: Record<string, Memory>): Promise<void> {
-  await put(BLOB_PATH, JSON.stringify(memories, null, 2), {
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    contentType: "application/json",
+export interface MemoryEntry {
+  id: string;
+  content: string;
+  permanent: boolean;
+  updatedAt: string | null;
+}
+
+class SupermemoryError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "SupermemoryError";
+    this.status = status;
+  }
+}
+
+async function api<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const apiKey = process.env.SUPERMEMORY_API_KEY;
+  if (!apiKey) throw new Error("SUPERMEMORY_API_KEY is not set.");
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new SupermemoryError(`Supermemory ${method} ${path} failed (${response.status}): ${text}`, response.status);
+  }
+  return (text.length > 0 ? JSON.parse(text) : null) as T;
+}
+
+interface RawSearchResult {
+  id?: string;
+  documentId?: string;
+  docId?: string;
+  memory?: string;
+  chunk?: string;
+  content?: string;
+  similarity?: number;
+  score?: number;
+  updatedAt?: string;
+}
+
+interface RawMemoryEntry {
+  id?: string;
+  memory?: string;
+  isStatic?: boolean;
+  isForgotten?: boolean;
+  isLatest?: boolean;
+  updatedAt?: string;
 }
 
 export const memoryStore = {
-  async list(): Promise<Memory[]> {
-    const all = await readAll();
-    return Object.values(all).sort((a, b) => a.key.localeCompare(b.key));
+  /** Create a memory directly (immediately searchable). Returns the backing document id. */
+  async add(content: string, options?: { permanent?: boolean }): Promise<{ documentId: string }> {
+    const result = await api<{ documentId?: string }>("/v4/memories", "POST", {
+      containerTag: CONTAINER_TAG,
+      memories: [{ content, isStatic: options?.permanent ?? false }],
+    });
+    return { documentId: result.documentId ?? "" };
   },
 
-  async put(key: string, value: string): Promise<Memory> {
-    const all = await readAll();
-    const memory: Memory = { key, value, updatedAt: new Date().toISOString() };
-    all[key] = memory;
-    await writeAll(all);
-    return memory;
+  async search(query: string): Promise<MemorySearchResult[]> {
+    const result = await api<{ results?: RawSearchResult[] }>("/v4/search", "POST", {
+      q: query,
+      containerTag: CONTAINER_TAG,
+      searchMode: "hybrid",
+    });
+    return (result.results ?? []).map((raw) => ({
+      id: raw.id ?? raw.docId ?? raw.documentId ?? "",
+      content: raw.memory ?? raw.chunk ?? raw.content ?? "",
+      similarity: raw.similarity ?? raw.score ?? 0,
+      updatedAt: raw.updatedAt ?? null,
+    }));
   },
 
-  async delete(key: string): Promise<boolean> {
-    const all = await readAll();
-    if (!(key in all)) return false;
-    delete all[key];
-    await writeAll(all);
-    return true;
+  /** Auto-maintained user profile: stable facts plus recent context. */
+  async profile(): Promise<MemoryProfile> {
+    const result = await api<{ profile?: { static?: string[]; dynamic?: string[] } }>("/v4/profile", "POST", {
+      containerTag: CONTAINER_TAG,
+    });
+    return {
+      static: result.profile?.static ?? [],
+      dynamic: result.profile?.dynamic ?? [],
+    };
+  },
+
+  /** Every active memory entry, with the ids `delete` needs. */
+  async list(): Promise<MemoryEntry[]> {
+    // This endpoint still takes the plural containerTags form.
+    const result = await api<{ memoryEntries?: RawMemoryEntry[] }>("/v4/memories/list", "POST", {
+      containerTags: [CONTAINER_TAG],
+      limit: 200,
+    });
+    return (result.memoryEntries ?? [])
+      .filter((raw) => raw.isForgotten !== true && raw.isLatest !== false)
+      .map((raw) => ({
+        id: raw.id ?? "",
+        content: raw.memory ?? "",
+        permanent: raw.isStatic ?? false,
+        updatedAt: raw.updatedAt ?? null,
+      }));
+  },
+
+  async delete(memoryId: string): Promise<boolean> {
+    try {
+      const result = await api<{ forgotten?: boolean }>("/v4/memories", "DELETE", {
+        containerTag: CONTAINER_TAG,
+        id: memoryId,
+      });
+      return result.forgotten ?? true;
+    } catch (error) {
+      if (error instanceof SupermemoryError && error.status === 404) return false;
+      throw error;
+    }
   },
 };
