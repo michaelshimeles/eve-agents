@@ -511,7 +511,19 @@ function ChatApp() {
     void fetch("/api/models")
       .then((response) => (response.ok ? response.json() : null))
       .then((body: { models?: ModelOption[] } | null) => {
-        if (body?.models?.length) setModels(body.models);
+        if (!body?.models?.length) return;
+        setModels(body.models);
+        // A saved model that left the catalog would fail every turn; fall
+        // back to the default rather than keep sending a stale id.
+        setModel((current) => {
+          if (body.models?.some((option) => option.id === current)) return current;
+          try {
+            localStorage.setItem(MODEL_KEY, DEFAULT_MODEL_ID);
+          } catch {
+            // Storage unavailable; the reset still applies for this session.
+          }
+          return DEFAULT_MODEL_ID;
+        });
       })
       .catch(() => undefined);
   }, []);
