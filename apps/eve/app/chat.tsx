@@ -851,7 +851,7 @@ function SidebarThread({
         <span className="relative flex items-center">
           {busy && (
             <span
-              className="absolute -start-1 size-1.5 shrink-0 -translate-x-full animate-pulse rounded-full bg-primary"
+              className="absolute -start-1 size-1.5 shrink-0 -translate-x-full animate-pulse rounded-full bg-primary rtl:translate-x-full"
               role="status"
               aria-label="Turn in progress"
             />
