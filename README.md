@@ -1,25 +1,42 @@
-# eve-agents
+# eveclaw
 
-A personal AI agent ("Eve") built with the [eve framework](https://eve.dev), served through a Next.js web chat and Telegram. Turborepo monorepo with the agent app in `apps/eve`.
+A personal AI assistant ("Eve") in the spirit of OpenClaw — proactive, always-on, and reachable from the web or Telegram. Built on the durable [eve framework](https://eve.dev) with a Next.js chat UI styled with Cloudflare's Kumo design system. Turborepo monorepo with the app in `apps/eve`.
 
 ## What it does
 
-- **Web chat** — Next.js app with threads (rename/pin/delete/search), slash commands, file attachments, and streaming responses. Thread metadata lives in Neon Postgres.
-- **Telegram channel** — private-DM-only bot with an allowlist (`TELEGRAM_ALLOWED_USER_IDS`).
-- **Long-term memory** — Supermemory-backed `remember` / `forget` / `search_memory` / `list_memories` tools, with a profile summary injected each turn.
-- **Receipt tracking** — `log_receipt` / `query_receipts` / `spending_summary` tools backed by Neon.
-- **Chat-created skills** — the agent can write, list, and delete its own skills at runtime (`create_skill` / `delete_skill`).
+**Chat**
+
+- **Web chat** — threads (rename/pin/delete), streaming responses, file attachments, slash-command prompts, model picker, and HTML artifact previews.
+- **Command palette (⌘K)** — jump to threads, start a new chat, open the manage page, toggle notifications.
+- **Full-text search** — sidebar search matches message content across all threads, not just titles.
+- **Message actions** — copy a reply, edit & resend, regenerate the last reply, or fork a thread from any message.
+- **Telegram channel** — private-DM-only bot with a user-id allowlist.
+
+**Proactive**
+
+- **Reminders & schedules** — ask Eve for one-off or recurring (cron) reminders; they fire into a new thread.
+- **Event triggers** — Eve can mint webhook URLs so external services can start conversations.
+- **Push notifications** — browser web-push for proactive threads, plus unread indicators in the sidebar.
+
+**Agent capabilities**
+
+- **Long-term memory** — Supermemory-backed remember/forget/search tools with nightly consolidation and a profile summary injected each turn.
+- **App integrations** — Composio connections (Gmail, GitHub, Notion, Linear, …) with a UI to connect/disconnect apps.
+- **Chat-created skills** — Eve can write, list, and delete her own skills at runtime; manage them from the UI.
+- **File sharing** — Eve uploads sandbox files to Blob storage and hands back a public link.
+- **Receipt tracking** — log/query/summarize spending, backed by Neon.
 - **Browser control** — sandboxed browser extension for web tasks.
-- **App integrations** — Composio connection for third-party apps, plus small utility tools (weather, dice).
+
+**Manage page** — `/manage` shows reminders (with run history), webhooks, memories, connections, and skills in one place.
 
 ## Structure
 
 ```
 apps/eve/
-  agent/        # eve agent: channels, tools, skills, instructions, extensions
-  app/          # Next.js web chat UI + API routes (threads, commands)
-  components/   # UI components
-  lib/          # threads DB (Neon), web auth
+  agent/        # eve agent: channels, tools, skills, schedules, instructions
+  app/          # Next.js web chat UI + API routes (threads, search, automations)
+  components/   # UI components (Kumo design system)
+  lib/          # Neon-backed stores (threads, push), Composio connect, web auth
 ```
 
 The Next.js app mounts the agent on the same origin via `withEve` — `/eve/v1/**` routes to the agent service. One dev server, one Vercel deployment.
@@ -30,6 +47,7 @@ Requires Node 24.
 
 ```bash
 npm install
+cp apps/eve/.env.example apps/eve/.env.local   # then fill in values
 npm run dev   # turbo runs next dev for apps/eve on localhost:3000
 ```
 
@@ -37,15 +55,16 @@ npm run dev   # turbo runs next dev for apps/eve on localhost:3000
 
 ### Environment
 
-Set these in `apps/eve/.env.local` (and the Vercel project for production):
+See [`apps/eve/.env.example`](apps/eve/.env.example) for the full annotated list. The essentials:
 
 | Variable | Used for |
 | --- | --- |
-| `DATABASE_URL` | Neon Postgres (threads, receipts) |
+| `DATABASE_URL` | Neon Postgres (threads, reminders, webhooks, receipts, push) |
 | `SUPERMEMORY_API_KEY` | Long-term memory |
 | `COMPOSIO_API_KEY` | App integrations |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN` | Telegram channel |
-| `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated allowlist of Telegram user ids |
+| `BLOB_READ_WRITE_TOKEN` | File sharing + skill store |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web push notifications |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | Telegram channel (optional) |
 
 ## Scripts
 
