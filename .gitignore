@@ -1,6 +1,7 @@
 node_modules
 .turbo
 .env*
+!.env.example
 .DS_Store
 *.tsbuildinfo
 .vercel

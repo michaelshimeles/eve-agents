@@ -28,25 +28,37 @@ async function ensureTable(): Promise<void> {
       ALTER TABLE web_chat_threads
         ADD COLUMN IF NOT EXISTS renamed boolean NOT NULL DEFAULT false
     `;
+    await sql()`
+      ALTER TABLE web_chat_threads
+        ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'web'
+    `;
   })();
   await ensured;
 }
+
+/** Who started the thread: the user, a fired reminder, or a webhook event. */
+export type ThreadOrigin = "web" | "reminder" | "webhook";
 
 export interface ThreadMetaRow {
   title: string;
   updatedAt: number;
   pinned: boolean;
   renamed: boolean;
+  origin?: ThreadOrigin;
 }
 
 export interface ThreadRow extends ThreadMetaRow {
   id: string;
 }
 
+function toOrigin(value: unknown): ThreadOrigin {
+  return value === "reminder" || value === "webhook" ? value : "web";
+}
+
 export async function listThreads(): Promise<ThreadRow[]> {
   await ensureTable();
   const rows = await sql()`
-    SELECT id, title, updated_at, pinned, renamed
+    SELECT id, title, updated_at, pinned, renamed, origin
     FROM web_chat_threads ORDER BY updated_at DESC
   `;
   return rows.map((row) => ({
@@ -55,7 +67,62 @@ export async function listThreads(): Promise<ThreadRow[]> {
     updatedAt: Number(row.updated_at),
     pinned: Boolean(row.pinned),
     renamed: Boolean(row.renamed),
+    origin: toOrigin(row.origin),
   }));
+}
+
+export interface ThreadSearchResult {
+  id: string;
+  title: string;
+  updatedAt: number;
+  /** Short excerpt around the first message-content match, if any. */
+  snippet: string | null;
+}
+
+/**
+ * Case-insensitive full-text search over thread titles and message content.
+ * Message text is extracted from the persisted event log (user messages ride
+ * in `message.received`, assistant replies in `message.completed`), so this
+ * is a scan — fine at personal-assistant thread counts.
+ */
+export async function searchThreads(query: string, limit: number): Promise<ThreadSearchResult[]> {
+  await ensureTable();
+  const escaped = query.replace(/[%_\\]/g, (char) => `\\${char}`);
+  const pattern = `%${escaped}%`;
+  const rows = await sql()`
+    SELECT id, title, updated_at, body FROM (
+      SELECT id, title, updated_at,
+        coalesce(
+          (SELECT string_agg(event->'data'->>'message', E'\n')
+             FROM jsonb_array_elements(chat->'events') AS event
+            WHERE event->>'type' IN ('message.received', 'message.completed')),
+          ''
+        ) AS body
+      FROM web_chat_threads
+    ) AS threads
+    WHERE title ILIKE ${pattern} OR body ILIKE ${pattern}
+    ORDER BY updated_at DESC
+    LIMIT ${limit}
+  `;
+  const needle = query.toLowerCase();
+  return rows.map((row) => {
+    const body = row.body as string;
+    const at = body.toLowerCase().indexOf(needle);
+    let snippet: string | null = null;
+    if (at >= 0) {
+      const start = Math.max(0, at - 40);
+      const end = Math.min(body.length, at + needle.length + 60);
+      snippet =
+        `${start > 0 ? "…" : ""}${body.slice(start, end).replaceAll("\n", " ").trim()}` +
+        `${end < body.length ? "…" : ""}`;
+    }
+    return {
+      id: row.id as string,
+      title: row.title as string,
+      updatedAt: Number(row.updated_at),
+      snippet,
+    };
+  });
 }
 
 /** Returns the stored chat payload, or null when the thread doesn't exist. */
@@ -65,6 +132,8 @@ export async function getThreadChat(id: string): Promise<unknown | null> {
   return rows.length > 0 ? rows[0].chat : null;
 }
 
+// Origin is written once on insert and never updated: rename/pin/chat writes
+// from the UI must not reset a reminder/webhook thread back to "web".
 export async function upsertThread(
   id: string,
   meta: ThreadMetaRow,
@@ -72,9 +141,9 @@ export async function upsertThread(
 ): Promise<void> {
   await ensureTable();
   await sql()`
-    INSERT INTO web_chat_threads (id, title, updated_at, pinned, renamed, chat)
+    INSERT INTO web_chat_threads (id, title, updated_at, pinned, renamed, origin, chat)
     VALUES (${id}, ${meta.title}, ${meta.updatedAt}, ${meta.pinned}, ${meta.renamed},
-            ${JSON.stringify(chat)}::jsonb)
+            ${meta.origin ?? "web"}, ${JSON.stringify(chat)}::jsonb)
     ON CONFLICT (id) DO UPDATE
       SET title = EXCLUDED.title,
           updated_at = EXCLUDED.updated_at,
@@ -88,8 +157,9 @@ export async function upsertThread(
 export async function upsertThreadMeta(id: string, meta: ThreadMetaRow): Promise<void> {
   await ensureTable();
   await sql()`
-    INSERT INTO web_chat_threads (id, title, updated_at, pinned, renamed)
-    VALUES (${id}, ${meta.title}, ${meta.updatedAt}, ${meta.pinned}, ${meta.renamed})
+    INSERT INTO web_chat_threads (id, title, updated_at, pinned, renamed, origin)
+    VALUES (${id}, ${meta.title}, ${meta.updatedAt}, ${meta.pinned}, ${meta.renamed},
+            ${meta.origin ?? "web"})
     ON CONFLICT (id) DO UPDATE
       SET title = EXCLUDED.title,
           updated_at = EXCLUDED.updated_at,

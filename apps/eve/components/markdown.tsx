@@ -1,7 +1,7 @@
 "use client";
 
-import { CheckIcon, CopyIcon } from "@phosphor-icons/react";
-import { useRef, useState, type ComponentProps } from "react";
+import { CheckIcon, CopyIcon, EyeIcon, EyeSlashIcon } from "@phosphor-icons/react";
+import { isValidElement, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRemarkPlugins, Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
@@ -12,30 +12,84 @@ import { cn } from "@/lib/utils";
 // keep those (GFM tables, code meta) and append.
 const remarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks];
 
-// A bare <pre> wrapped with a hover copy button. The wrapper stays outside
-// typeset's element styles; the button opts out via not-typeset.
+// Detects the fenced block's language from the inner <code class="language-x">.
+function codeLanguage(children: ReactNode): string | null {
+  const child = Array.isArray(children) ? children[0] : children;
+  if (!isValidElement(child)) return null;
+  const className = (child.props as { className?: string }).className ?? "";
+  const match = /language-([\w-]+)/.exec(className);
+  return match ? match[1] : null;
+}
+
+// A bare <pre> wrapped with hover actions: copy, and for HTML blocks a live
+// preview rendered in a sandboxed iframe (scripts allowed, same-origin not).
+// The wrapper stays outside typeset's element styles; buttons opt out via
+// not-typeset.
 function CodeBlock({ children, ...props }: ComponentProps<"pre">) {
   const preRef = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const previewable = codeLanguage(children) === "html";
+  const actionClass =
+    "not-typeset rounded-md bg-kumo-base/80 p-1.5 text-kumo-subtle ring ring-kumo-hairline opacity-0 backdrop-blur-sm transition-opacity hover:text-kumo-default focus-visible:opacity-100 group-hover/code:opacity-100";
+
   return (
     <div className="group/code relative">
-      <pre ref={preRef} {...props}>
+      <pre
+        ref={preRef}
+        {...props}
+        className={cn(
+          // Code blocks scroll horizontally without showing a scrollbar.
+          "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+          props.className,
+          previewHtml !== null && "hidden",
+        )}
+      >
         {children}
       </pre>
-      <button
-        type="button"
-        aria-label="Copy code"
-        className="not-typeset absolute end-2 top-2 rounded-md bg-kumo-base/80 p-1.5 text-kumo-subtle ring ring-kumo-hairline opacity-0 backdrop-blur-sm transition-opacity hover:text-kumo-default focus-visible:opacity-100 group-hover/code:opacity-100"
-        onClick={() => {
-          const text = preRef.current?.innerText ?? "";
-          void navigator.clipboard.writeText(text).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          });
-        }}
-      >
-        {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-      </button>
+      {previewHtml !== null && (
+        <iframe
+          title="HTML preview"
+          sandbox="allow-scripts"
+          srcDoc={previewHtml}
+          className="not-typeset h-96 w-full rounded-lg bg-white ring ring-kumo-hairline"
+        />
+      )}
+      <div className="absolute end-2 top-2 flex gap-1">
+        {previewable && (
+          <button
+            type="button"
+            aria-label={previewHtml !== null ? "Show code" : "Preview HTML"}
+            title={previewHtml !== null ? "Show code" : "Preview HTML"}
+            className={cn(actionClass, previewHtml !== null && "opacity-100")}
+            onClick={() =>
+              setPreviewHtml((current) =>
+                current !== null ? null : (preRef.current?.innerText ?? ""),
+              )
+            }
+          >
+            {previewHtml !== null ? (
+              <EyeSlashIcon className="size-3.5" />
+            ) : (
+              <EyeIcon className="size-3.5" />
+            )}
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label="Copy code"
+          className={actionClass}
+          onClick={() => {
+            const text = preRef.current?.innerText ?? "";
+            void navigator.clipboard.writeText(text).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            });
+          }}
+        >
+          {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+        </button>
+      </div>
     </div>
   );
 }

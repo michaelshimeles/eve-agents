@@ -6,12 +6,18 @@ import { useEveAgent } from "eve/react";
 import type { EveMessage, EveMessagePart } from "eve/react";
 import { Button, Dialog, Input, InputArea, LinkButton, Loader } from "@cloudflare/kumo";
 import {
+  AlarmIcon,
   ArrowClockwiseIcon,
   ArrowUpIcon,
+  BellIcon,
+  BellSlashIcon,
   CaretDownIcon,
   CheckIcon,
   CopyIcon,
   FileIcon,
+  GearSixIcon,
+  GitBranchIcon,
+  LightningIcon,
   MagnifyingGlassIcon,
   KeyIcon,
   MicrophoneIcon,
@@ -30,7 +36,10 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { CommandPalette } from "@/components/command-palette";
+import { ManagePanel } from "@/components/manage-panel";
 import { Markdown } from "@/components/markdown";
+import { usePushNotifications } from "@/components/use-push";
 import {
   Attachment,
   AttachmentAction,
@@ -56,6 +65,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const THREADS_KEY = "eve-web-threads";
+const SEEN_KEY = "eve-web-threads-seen";
 const LEGACY_CHAT_KEY = "eve-web-chat";
 const MODEL_KEY = "eve-web-model";
 const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5";
@@ -106,6 +116,14 @@ function chatKey(threadId: string): string {
 interface SavedChat {
   events?: readonly HandleMessageStreamEvent[];
   session?: SessionState;
+  /** When this device wrote the copy; lets cross-device sync spot staleness. */
+  savedAt?: number;
+  /**
+   * Set on threads forked from a message. eve sessions are append-only, so a
+   * fork starts a fresh session; this transcript rides along as one-turn
+   * client context on the fork's first send so the agent knows the history.
+   */
+  forkContext?: string;
 }
 
 interface ThreadMeta {
@@ -115,6 +133,8 @@ interface ThreadMeta {
   pinned?: boolean;
   /** Set once the user renames a thread, so auto-titles stop overwriting it. */
   renamed?: boolean;
+  /** Who started the thread; reminder/webhook threads get a sidebar badge. */
+  origin?: "web" | "reminder" | "webhook";
 }
 
 interface ThreadIndex {
@@ -163,7 +183,7 @@ function loadSavedChat(threadId: string): SavedChat | null {
 
 function saveLocalChat(threadId: string, chat: SavedChat): void {
   try {
-    localStorage.setItem(chatKey(threadId), JSON.stringify(chat));
+    localStorage.setItem(chatKey(threadId), JSON.stringify({ ...chat, savedAt: Date.now() }));
   } catch {
     // Storage full or unavailable; the server copy still gets written.
   }
@@ -177,6 +197,7 @@ function threadMetaBody(meta: ThreadMeta) {
     updatedAt: meta.updatedAt,
     pinned: meta.pinned === true,
     renamed: meta.renamed === true,
+    origin: meta.origin,
   };
 }
 
@@ -442,12 +463,21 @@ interface ThreadSection {
   threads: ThreadMeta[];
 }
 
-function sectionThreads(threads: ThreadMeta[], query: string): ThreadSection[] {
+function sectionThreads(
+  threads: ThreadMeta[],
+  query: string,
+  contentMatchIds: ReadonlySet<string>,
+): ThreadSection[] {
   const sorted = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
   const needle = query.trim().toLowerCase();
   if (needle.length > 0) {
     return [
-      { label: null, threads: sorted.filter((t) => t.title.toLowerCase().includes(needle)) },
+      {
+        label: null,
+        threads: sorted.filter(
+          (t) => t.title.toLowerCase().includes(needle) || contentMatchIds.has(t.id),
+        ),
+      },
     ];
   }
   const groups = new Map<string, ThreadMeta[]>([
@@ -464,7 +494,22 @@ function sectionThreads(threads: ThreadMeta[], query: string): ThreadSection[] {
     .map(([label, list]) => ({ label, threads: list }));
 }
 
-export function Chat() {
+// Per-thread "last seen" timestamps behind the sidebar's unread dots. A
+// thread is unread when its updatedAt has moved past the recorded seen time
+// (a fired reminder created it, or another device wrote to it).
+function loadSeenMap(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, number>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function Chat({ initialView = "chat" }: { initialView?: MainView } = {}) {
   // localStorage is read in useState initializers, so only mount the chat
   // on the client to avoid an SSR/hydration mismatch.
   const [mounted, setMounted] = useState(false);
@@ -472,10 +517,13 @@ export function Chat() {
   if (!mounted) {
     return <main className="h-dvh bg-kumo-canvas" />;
   }
-  return <ChatApp />;
+  return <ChatApp initialView={initialView} />;
 }
 
-function ChatApp() {
+/** What the main column shows; the sidebar is shared between both. */
+type MainView = "chat" | "manage";
+
+function ChatApp({ initialView }: { initialView: MainView }) {
   const [index, setIndex] = useState<ThreadIndex>(loadThreadIndex);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // The thread meta is kept separately from the open flag so the dialog's
@@ -483,11 +531,37 @@ function ChatApp() {
   const [threadToDelete, setThreadToDelete] = useState<ThreadMeta | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   // The active thread's chat payload; null while it loads from the server.
-  const [activeChat, setActiveChat] = useState<{ threadId: string; chat: SavedChat } | null>(null);
+  // revision bumps when a fresher server copy replaces the mounted one, so
+  // ChatThread (keyed on it) remounts with the new events.
+  const [activeChat, setActiveChat] = useState<{
+    threadId: string;
+    chat: SavedChat;
+    revision?: number;
+  } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  // Thread ids whose message content matches the sidebar search (server-side
+  // full-text pass); merged with the local title filter.
+  const [contentMatchIds, setContentMatchIds] = useState<ReadonlySet<string>>(() => new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Navigation command palette (Cmd+K).
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  // Composer prefill for a freshly forked thread (fork via "edit & resend").
+  const [pendingDraft, setPendingDraft] = useState<{ threadId: string; text: string } | null>(
+    null,
+  );
   // Threads with a turn still running, so background threads get a dot.
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Unread dots: last-seen time per thread (see loadSeenMap).
+  const [seenAt, setSeenAt] = useState<Record<string, number>>(loadSeenMap);
+  // First run on this device (no stored seen map): the first server sync
+  // adopts every thread as read so history doesn't arrive covered in dots.
+  const needsSeenSeedRef = useRef(Object.keys(seenAt).length === 0);
+  // Whether the main column shows the chat or the manage panel. The sidebar
+  // stays mounted either way; the URL is kept in sync via pushState so
+  // /manage is linkable and back/forward work without remounting the app.
+  const [view, setView] = useState<MainView>(initialView);
+  // Web push opt-in for proactive notifications.
+  const push = usePushNotifications();
   // Slash-command palette: built-ins plus skills saved from chat.
   const [commands, setCommands] = useState<SlashCommand[]>(BUILTIN_COMMANDS);
   // Model picker: catalog from the Vercel AI Gateway, selection persisted.
@@ -539,6 +613,23 @@ function ChatApp() {
     }
   }, [index]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify(seenAt));
+    } catch {
+      // Storage full or unavailable; dots reset on reload at worst.
+    }
+  }, [seenAt]);
+
+  // The open thread is always caught up: record its latest activity as seen.
+  useEffect(() => {
+    const active = index.threads.find((thread) => thread.id === index.activeId);
+    if (!active) return;
+    setSeenAt((prev) =>
+      (prev[active.id] ?? 0) >= active.updatedAt ? prev : { ...prev, [active.id]: active.updatedAt },
+    );
+  }, [index]);
+
   // In production the session routes sit behind HTTP Basic auth. Probing a
   // protected route on load makes the browser show its login prompt up front
   // instead of on the first send.
@@ -586,7 +677,10 @@ function ChatApp() {
           );
           for (const thread of prev.threads) {
             const existing = byId.get(thread.id);
-            if (!existing || thread.updatedAt > existing.updatedAt) byId.set(thread.id, thread);
+            if (!existing) byId.set(thread.id, thread);
+            else if (thread.updatedAt > existing.updatedAt)
+              // Local copy wins, but origin is server-authored: keep it.
+              byId.set(thread.id, { ...thread, origin: thread.origin ?? existing.origin });
           }
           const threads = [...byId.values()];
           const activeId = threads.some((thread) => thread.id === prev.activeId)
@@ -594,6 +688,19 @@ function ChatApp() {
             : [...threads].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
           return { activeId, threads };
         });
+        // First run on this device: adopt everything as read so history
+        // doesn't arrive covered in dots. After that, only new activity dots.
+        if (needsSeenSeedRef.current) {
+          needsSeenSeedRef.current = false;
+          setSeenAt((prev) => {
+            const seeded: Record<string, number> = {};
+            for (const thread of serverThreads) seeded[thread.id] = thread.updatedAt;
+            for (const thread of indexRef.current.threads) {
+              seeded[thread.id] = Math.max(seeded[thread.id] ?? 0, thread.updatedAt);
+            }
+            return { ...seeded, ...prev };
+          });
+        }
       });
     }
     syncServerThreads();
@@ -613,19 +720,41 @@ function ChatApp() {
     const local = loadSavedChat(index.activeId);
     if (local) setActiveChat({ threadId: index.activeId, chat: local });
   }
+  // Fetch from the server when there's no local copy, or when the thread's
+  // synced updatedAt says another device wrote after our local savedAt (the
+  // local copy is stale). refreshedRef stops clock skew between devices from
+  // refetching the same state forever.
+  const refreshedRef = useRef<string | null>(null);
   useEffect(() => {
     const threadId = index.activeId;
-    if (loadSavedChat(threadId)) return;
+    if (busyIds.has(threadId)) return; // never clobber a streaming turn
+    const meta = index.threads.find((thread) => thread.id === threadId);
+    const local = loadSavedChat(threadId);
+    const stale = local !== null && meta !== undefined && (local.savedAt ?? 0) < meta.updatedAt;
+    if (local && !stale) return;
+    const refreshKey = `${threadId}:${meta?.updatedAt ?? 0}`;
+    if (local && refreshedRef.current === refreshKey) return;
     let cancelled = false;
     void fetchServerChat(threadId).then((chat) => {
       if (cancelled) return;
+      refreshedRef.current = refreshKey;
+      if (local !== null && (chat?.events?.length ?? 0) <= (local.events?.length ?? 0)) {
+        // The server copy isn't ahead of ours (often our own PUT still in
+        // flight). Re-stamp the local copy as fresh so we stop probing.
+        saveLocalChat(threadId, local);
+        return;
+      }
       if (chat) saveLocalChat(threadId, chat);
-      setActiveChat({ threadId, chat: chat ?? {} });
+      setActiveChat((prev) => ({
+        threadId,
+        chat: chat ?? {},
+        revision: prev?.threadId === threadId ? (prev.revision ?? 0) + 1 : 0,
+      }));
     });
     return () => {
       cancelled = true;
     };
-  }, [index.activeId]);
+  }, [index, busyIds]);
 
   function persistChat(threadId: string, chat: SavedChat) {
     saveLocalChat(threadId, chat);
@@ -633,18 +762,102 @@ function ChatApp() {
     if (meta) putThreadToServer(meta, chat);
   }
 
-  const sections = sectionThreads(index.threads, searchQuery);
+  // Sidebar search: titles match locally; from two characters the server's
+  // message-content search joins in (debounced).
+  useEffect(() => {
+    const needle = searchQuery.trim();
+    if (needle.length < 2) {
+      setContentMatchIds(new Set());
+      return;
+    }
+    const timer = setTimeout(() => {
+      void fetch(`/api/threads/search?q=${encodeURIComponent(needle)}`)
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { results?: { id: string }[] } | null) => {
+          setContentMatchIds(new Set((body?.results ?? []).map((result) => result.id)));
+        })
+        .catch(() => undefined);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Cmd+K / Ctrl+K opens the navigation palette.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Deep link from the /manage page: /?thread=<id> opens that thread. The
+  // param is consumed once and stripped so reloads don't re-apply it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const threadId = url.searchParams.get("thread");
+    if (threadId === null) return;
+    url.searchParams.delete("thread");
+    window.history.replaceState(null, "", url.pathname + url.search);
+    setIndex((prev) => ({ ...prev, activeId: threadId }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Back/forward between "/" and "/manage" (we navigate with pushState so the
+  // app, and especially the sidebar, never remounts).
+  useEffect(() => {
+    function onPopState() {
+      setView(window.location.pathname === "/manage" ? "manage" : "chat");
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const sections = sectionThreads(index.threads, searchQuery, contentMatchIds);
+
+  function showView(next: MainView) {
+    setView(next);
+    const path = next === "manage" ? "/manage" : "/";
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, "", path);
+    }
+  }
 
   function newThread() {
     const meta = newThreadMeta();
     // Seed the local chat so the new thread renders without a server probe.
     saveLocalChat(meta.id, {});
+    setPendingDraft(null);
     setIndex((prev) => ({ activeId: meta.id, threads: [meta, ...prev.threads] }));
     setSidebarOpen(false);
+    showView("chat");
   }
 
   function selectThread(id: string) {
+    setPendingDraft(null);
     setIndex((prev) => ({ ...prev, activeId: id }));
+    setSidebarOpen(false);
+    showView("chat");
+  }
+
+  /** New thread seeded with history sliced from the active one (fork). */
+  function forkThread(chat: SavedChat, draft?: string) {
+    const source = indexRef.current.threads.find(
+      (thread) => thread.id === indexRef.current.activeId,
+    );
+    const meta: ThreadMeta = {
+      ...newThreadMeta(),
+      title: source ? `Fork: ${source.title}`.slice(0, 80) : "Forked thread",
+      // Protect the fork title from the auto-titling backfill.
+      renamed: true,
+    };
+    const saved: SavedChat = { ...chat, savedAt: Date.now() };
+    saveLocalChat(meta.id, saved);
+    putThreadToServer(meta, saved);
+    setPendingDraft(draft !== undefined ? { threadId: meta.id, text: draft } : null);
+    setIndex((prev) => ({ activeId: meta.id, threads: [meta, ...prev.threads] }));
     setSidebarOpen(false);
   }
 
@@ -748,16 +961,57 @@ function ChatApp() {
         )}
       >
         <div className="flex items-center justify-between px-3 py-2.5">
-          <span className="text-sm font-semibold">Eve</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            shape="square"
-            icon={PlusIcon}
-            aria-label="New thread"
-            title="New thread"
-            onClick={newThread}
-          />
+          <button
+            type="button"
+            className="rounded-sm text-sm font-semibold hover:text-kumo-strong"
+            aria-label="Back to chat"
+            title="Back to chat"
+            onClick={() => showView("chat")}
+          >
+            Eve
+          </button>
+          <div className="flex items-center">
+            {push.status !== "unsupported" && push.status !== "loading" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={push.status === "on" ? BellIcon : BellSlashIcon}
+                aria-label={
+                  push.status === "on" ? "Disable notifications" : "Enable notifications"
+                }
+                title={
+                  push.status === "on"
+                    ? "Notifications on - click to disable"
+                    : push.status === "denied"
+                      ? "Notifications blocked in browser settings"
+                      : "Enable notifications"
+                }
+                className={cn(push.status !== "on" && "text-kumo-subtle")}
+                onClick={push.toggle}
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              shape="square"
+              icon={GearSixIcon}
+              aria-label="Manage"
+              aria-pressed={view === "manage"}
+              title="Manage: reminders, triggers, memory, connections, skills"
+              className={cn(view === "manage" && "bg-kumo-tint text-kumo-strong")}
+              onClick={() => showView(view === "manage" ? "chat" : "manage")}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              shape="square"
+              icon={PlusIcon}
+              aria-label="New thread"
+              title="New thread"
+              onClick={newThread}
+            />
+          </div>
         </div>
         <div className="px-2 pb-2">
           <div className="relative">
@@ -797,8 +1051,17 @@ function ChatApp() {
                   <SidebarThread
                     key={thread.id}
                     thread={thread}
-                    active={thread.id === index.activeId}
+                    // The active-thread highlight and the gear highlight are
+                    // mutually exclusive: on the manage view the gear owns it.
+                    active={view === "chat" && thread.id === index.activeId}
                     busy={busyIds.has(thread.id)}
+                    unread={
+                      thread.id !== index.activeId &&
+                      // Before the first-sync seeding, nothing is unread; after
+                      // it, a thread with no seen entry is a new arrival.
+                      Object.keys(seenAt).length > 0 &&
+                      thread.updatedAt > (seenAt[thread.id] ?? 0)
+                    }
                     editing={editingId === thread.id}
                     onSelect={() => selectThread(thread.id)}
                     onStartRename={() => setEditingId(thread.id)}
@@ -817,16 +1080,42 @@ function ChatApp() {
         </nav>
       </aside>
 
-      {activeChat && activeChat.threadId === index.activeId ? (
+      {view === "manage" ? (
+        <main className="relative h-dvh min-w-0 flex-1 overflow-y-auto">
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={SidebarSimpleIcon}
+            className="absolute start-2 top-2 z-20 md:hidden"
+            aria-label="Open threads"
+            onClick={() => setSidebarOpen(true)}
+          />
+          <div className="w-full max-w-3xl px-6 py-6">
+            <header className="mb-5">
+              <h1 className="text-lg font-semibold">Manage</h1>
+              <p className="text-sm text-kumo-subtle">
+                What Eve does and knows on her own. Create reminders, triggers, and skills by
+                asking in chat.
+              </p>
+            </header>
+            <ManagePanel onOpenThread={selectThread} />
+          </div>
+        </main>
+      ) : activeChat && activeChat.threadId === index.activeId ? (
         <ChatThread
-          key={index.activeId}
+          key={`${index.activeId}:${activeChat.revision ?? 0}`}
           threadId={index.activeId}
           initialChat={activeChat.chat}
+          initialDraft={
+            pendingDraft?.threadId === index.activeId ? pendingDraft.text : undefined
+          }
           onTitle={(title) => setThreadTitle(index.activeId, title)}
           onActivity={(title) => touchThread(index.activeId, title)}
           onPersist={(chat) => persistChat(index.activeId, chat)}
           onBusyChange={(busy) => setThreadBusy(index.activeId, busy)}
           onOpenSidebar={() => setSidebarOpen(true)}
+          onFork={forkThread}
           commands={commands}
           model={model}
           models={models}
@@ -838,10 +1127,23 @@ function ChatApp() {
         </main>
       )}
 
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        threads={[...index.threads]
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .map((thread) => ({ id: thread.id, title: thread.title, updatedAt: thread.updatedAt }))}
+        onSelectThread={selectThread}
+        onNewChat={newThread}
+        onOpenManage={() => showView("manage")}
+        pushStatus={push.status}
+        onTogglePush={push.toggle}
+      />
+
       <Dialog.Root open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <Dialog size="base" className="p-6">
           <Dialog.Title>Delete thread?</Dialog.Title>
-          <Dialog.Description className="mt-2 text-kumo-subtle">
+          <Dialog.Description className="mt-2 text-sm text-kumo-subtle">
             &ldquo;{threadToDelete?.title}&rdquo; and its local history will be removed. This
             can&rsquo;t be undone.
           </Dialog.Description>
@@ -874,6 +1176,7 @@ function SidebarThread({
   thread,
   active,
   busy,
+  unread,
   editing,
   onSelect,
   onStartRename,
@@ -885,6 +1188,7 @@ function SidebarThread({
   thread: ThreadMeta;
   active: boolean;
   busy: boolean;
+  unread: boolean;
   editing: boolean;
   onSelect: () => void;
   onStartRename: () => void;
@@ -932,19 +1236,38 @@ function SidebarThread({
         type="button"
         onClick={onSelect}
         className={cn(
-          "w-full rounded-md px-2.5 py-1.5 pe-8 text-start group-hover/thread:bg-kumo-tint",
+          // ps-4 leaves room for the busy/unread dot, which hangs to the
+          // start of the title and would otherwise clip at the sidebar edge.
+          "w-full rounded-md py-1.5 pe-8 ps-4 text-start group-hover/thread:bg-kumo-tint",
           active && "bg-kumo-tint text-kumo-strong",
         )}
       >
         <span className="relative flex items-center">
-          {busy && (
+          {(busy || unread) && (
             <span
-              className="absolute -start-1 size-1.5 shrink-0 -translate-x-full animate-pulse rounded-full bg-kumo-brand rtl:translate-x-full"
+              className={cn(
+                "absolute -start-1 size-1.5 shrink-0 -translate-x-full rounded-full bg-kumo-brand rtl:translate-x-full",
+                busy && "animate-pulse",
+              )}
               role="status"
-              aria-label="Turn in progress"
+              aria-label={busy ? "Turn in progress" : "Unread activity"}
             />
           )}
-          <span className="truncate text-sm">{thread.title}</span>
+          <span className={cn("truncate text-sm", unread && "font-medium text-kumo-strong")}>
+            {thread.title}
+          </span>
+          {thread.origin === "reminder" && (
+            <AlarmIcon
+              className="ms-1.5 size-3 shrink-0 text-kumo-subtle"
+              aria-label="Started by a reminder"
+            />
+          )}
+          {thread.origin === "webhook" && (
+            <LightningIcon
+              className="ms-1.5 size-3 shrink-0 text-kumo-subtle"
+              aria-label="Started by a webhook"
+            />
+          )}
         </span>
         <span className="block text-xs text-kumo-subtle">
           {formatThreadDate(thread.updatedAt)}
@@ -983,11 +1306,13 @@ function SidebarThread({
 function ChatThread({
   threadId: _threadId,
   initialChat,
+  initialDraft,
   onTitle,
   onActivity,
   onPersist,
   onBusyChange,
   onOpenSidebar,
+  onFork,
   commands,
   model,
   models,
@@ -995,18 +1320,26 @@ function ChatThread({
 }: {
   threadId: string;
   initialChat: SavedChat;
+  /** Composer prefill, used when a fork was started from an edit. */
+  initialDraft?: string;
   onTitle: (title: string) => void;
   onActivity: (title?: string) => void;
   onPersist: (chat: SavedChat) => void;
   onBusyChange: (busy: boolean) => void;
   onOpenSidebar: () => void;
+  /** Creates a new thread seeded with `chat`, optionally prefilling the composer. */
+  onFork: (chat: SavedChat, draft?: string) => void;
   commands: SlashCommand[];
   model: string;
   models: ModelOption[];
   onModelChange: (id: string) => void;
 }) {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft ?? "");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // One-turn transcript context for threads forked from a message: eve
+  // sessions are append-only, so the fork starts a fresh session and this
+  // rides along on its first send only.
+  const forkContextRef = useRef(initialChat.forkContext);
 
   // Attachments staged in the composer, sent with the next message.
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -1028,8 +1361,19 @@ function ChatThread({
     initialEvents: initialChat.events ?? [],
     initialSession: initialChat.session,
     // Ride the selected gateway model along with every turn; the agent's
-    // dynamic model resolver reads it from the turn's client context.
-    prepareSend: (input) => ({ ...input, clientContext: { eveWebModel: model } }),
+    // dynamic model resolver reads it from the turn's client context. Forked
+    // threads also carry their source transcript on the first turn.
+    prepareSend: (input) => {
+      const forkedThreadTranscript = forkContextRef.current;
+      forkContextRef.current = undefined;
+      return {
+        ...input,
+        clientContext: {
+          eveWebModel: model,
+          ...(forkedThreadTranscript !== undefined ? { forkedThreadTranscript } : {}),
+        },
+      };
+    },
     onFinish(snapshot) {
       onPersist({ events: snapshot.events, session: snapshot.session });
       onActivity();
@@ -1217,8 +1561,69 @@ function ChatThread({
     void agent.send({ message: text });
   }
 
+  /** Re-asks the last user message on the same session (fresh reply, and a
+   * different model if one was just picked). */
+  function regenerateLastReply() {
+    const lastUser = agent.data.messages.findLast((message) => message.role === "user");
+    if (!lastUser) return;
+    retryMessage(messageText(lastUser));
+  }
+
+  /** Plain-text transcript of `messages` for the fork's client context. */
+  function buildTranscript(messages: readonly EveMessage[]): string | undefined {
+    const lines = messages
+      .map((message) => {
+        const text = messageText(message);
+        return text.length > 0 ? `${message.role === "user" ? "Micky" : "Eve"}: ${text}` : null;
+      })
+      .filter((line): line is string => line !== null);
+    if (lines.length === 0) return undefined;
+    const transcript = lines.join("\n\n");
+    // Keep the context message bounded; the tail is the relevant part.
+    return transcript.length > 8000 ? `…${transcript.slice(-8000)}` : transcript;
+  }
+
+  /**
+   * Starts a new thread carrying history up to `message`. eve sessions are
+   * append-only, so the fork replays the sliced event log for display and
+   * starts a fresh session; `buildTranscript` output rides the first send so
+   * the agent knows the carried history.
+   *
+   * `includeTurn` keeps the whole turn containing the message (fork from an
+   * assistant reply); without it history stops before that turn (edit &
+   * resend of a user message, whose old reply shouldn't come along).
+   */
+  function forkFromMessage(message: EveMessage, includeTurn: boolean, draftText?: string) {
+    const turnId = message.metadata?.turnId;
+    const events = agent.events;
+    let sliced: readonly HandleMessageStreamEvent[] = events;
+    if (turnId !== undefined) {
+      const matches = (event: HandleMessageStreamEvent) =>
+        "data" in event &&
+        (event.data as { turnId?: string } | undefined)?.turnId === turnId;
+      if (includeTurn) {
+        const last = events.findLastIndex(matches);
+        if (last >= 0) sliced = events.slice(0, last + 1);
+      } else {
+        const first = events.findIndex(matches);
+        sliced = first >= 0 ? events.slice(0, first) : events;
+      }
+    }
+
+    const messageIndex = agent.data.messages.findIndex((entry) => entry.id === message.id);
+    const carried =
+      messageIndex >= 0
+        ? agent.data.messages.slice(0, includeTurn ? messageIndex + 1 : messageIndex)
+        : agent.data.messages;
+
+    onFork({ events: sliced, forkContext: buildTranscript(carried) }, draftText);
+  }
+
   const hasMessages = agent.data.messages.length > 0;
   const lastUserId = agent.data.messages.findLast((message) => message.role === "user")?.id;
+  const lastAssistantId = agent.data.messages.findLast(
+    (message) => message.role === "assistant",
+  )?.id;
   // Keep the thinking indicator up until the reply has something to show;
   // reasoning models can stream for a while before any visible output.
   const lastMessage = agent.data.messages.at(-1);
@@ -1294,9 +1699,13 @@ function ChatThread({
                           ? usageByTurn.get(message.metadata.turnId)
                           : undefined
                       }
-                      showUserActions={message.id === lastUserId && !isBusy}
+                      busy={isBusy}
+                      isLastUser={message.id === lastUserId}
+                      isLastAssistant={message.id === lastAssistantId}
                       onEdit={editMessage}
                       onRetry={retryMessage}
+                      onRegenerate={regenerateLastReply}
+                      onFork={forkFromMessage}
                       onRespond={respondToInput}
                     />
                   </MessageScrollerItem>
@@ -1743,16 +2152,24 @@ function ModelPicker({
 function ChatMessage({
   message,
   usage,
-  showUserActions,
+  busy,
+  isLastUser,
+  isLastAssistant,
   onEdit,
   onRetry,
+  onRegenerate,
+  onFork,
   onRespond,
 }: {
   message: EveMessage;
   usage?: TurnUsage;
-  showUserActions: boolean;
+  busy: boolean;
+  isLastUser: boolean;
+  isLastAssistant: boolean;
   onEdit: (text: string) => void;
   onRetry: (text: string) => void;
+  onRegenerate: () => void;
+  onFork: (message: EveMessage, includeTurn: boolean, draft?: string) => void;
   onRespond: (requestId: string, optionId: string) => void;
 }) {
   const align = message.role === "user" ? "end" : "start";
@@ -1770,13 +2187,37 @@ function ChatMessage({
         {message.role === "assistant" && text.length > 0 && (
           <div className={cn(actionRowClass, !assistantDone && "invisible")}>
             <CopyButton text={text} />
+            {isLastAssistant && !busy && (
+              <Button
+                variant="ghost"
+                size="xs"
+                shape="square"
+                icon={ArrowClockwiseIcon}
+                aria-label="Regenerate reply"
+                title="Regenerate (re-asks with the currently selected model)"
+                className="text-kumo-subtle"
+                onClick={onRegenerate}
+              />
+            )}
+            {!busy && (
+              <Button
+                variant="ghost"
+                size="xs"
+                shape="square"
+                icon={GitBranchIcon}
+                aria-label="Fork thread from here"
+                title="Fork thread from here"
+                className="text-kumo-subtle"
+                onClick={() => onFork(message, true)}
+              />
+            )}
             {usage && (
               <span className="text-[11px] text-kumo-subtle">{formatUsage(usage)}</span>
             )}
           </div>
         )}
         {message.role === "user" && text.length > 0 && (
-          <div className={cn(actionRowClass, "justify-end", !showUserActions && "invisible")}>
+          <div className={cn(actionRowClass, "justify-end", busy && "invisible")}>
             <CopyButton text={text} />
             <Button
               variant="ghost"
@@ -1784,18 +2225,31 @@ function ChatMessage({
               shape="square"
               icon={PencilSimpleIcon}
               aria-label="Edit and resend"
+              title={
+                isLastUser
+                  ? "Edit and resend"
+                  : "Edit and resend from here (forks into a new thread)"
+              }
               className="text-kumo-subtle"
-              onClick={() => onEdit(text)}
+              onClick={() => {
+                // Editing the last message just refills the composer; editing
+                // an earlier one forks, since sessions are append-only and the
+                // messages after it shouldn't come along.
+                if (isLastUser) onEdit(text);
+                else onFork(message, false, text);
+              }}
             />
-            <Button
-              variant="ghost"
-              size="xs"
-              shape="square"
-              icon={ArrowClockwiseIcon}
-              aria-label="Retry"
-              className="text-kumo-subtle"
-              onClick={() => onRetry(text)}
-            />
+            {isLastUser && (
+              <Button
+                variant="ghost"
+                size="xs"
+                shape="square"
+                icon={ArrowClockwiseIcon}
+                aria-label="Retry"
+                className="text-kumo-subtle"
+                onClick={() => onRetry(text)}
+              />
+            )}
           </div>
         )}
       </MessageContent>

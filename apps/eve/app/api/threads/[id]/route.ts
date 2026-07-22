@@ -21,6 +21,7 @@ export async function PUT(request: Request, ctx: RouteContext): Promise<Response
     updatedAt?: unknown;
     pinned?: unknown;
     renamed?: unknown;
+    origin?: unknown;
     chat?: unknown;
   } | null;
   if (body === null || typeof body.title !== "string" || typeof body.updatedAt !== "number") {
@@ -31,6 +32,10 @@ export async function PUT(request: Request, ctx: RouteContext): Promise<Response
     updatedAt: body.updatedAt,
     pinned: body.pinned === true,
     renamed: body.renamed === true,
+    // Origin only matters on first insert; existing rows keep theirs.
+    origin: (body.origin === "reminder" || body.origin === "webhook"
+      ? body.origin
+      : "web") as "web" | "reminder" | "webhook",
   };
   // Meta-only updates (rename, pin) omit the chat payload to leave it intact.
   if (typeof body.chat === "object" && body.chat !== null) {
