@@ -52,7 +52,14 @@ export async function deliverToWebChatThread(
     { events, session: session.state },
   );
 
-  await sendPushToAll({ title: "Eve", body: pushBody(events) ?? clipTitle(title) });
+  // Best-effort: the thread is already persisted, so a notification failure
+  // must not fail the delivery — callers would retry the whole run and create
+  // a duplicate thread (and webhook history would lose the thread link).
+  try {
+    await sendPushToAll({ title: "Eve", body: pushBody(events) ?? clipTitle(title) });
+  } catch (error) {
+    console.error("Proactive push notification failed:", error);
+  }
   return threadId;
 }
 

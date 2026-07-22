@@ -40,6 +40,24 @@ function configureVapid(): boolean {
   return true;
 }
 
+/**
+ * Narrows unknown input to a complete web-push subscription. web-push needs
+ * endpoint + both encryption keys; anything less would be stored, fail local
+ * validation on every send, and never hit the 404/410 pruning path.
+ */
+export function parseSubscription(input: unknown): PushSubscription | null {
+  if (typeof input !== "object" || input === null) return null;
+  const candidate = input as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+  if (typeof candidate.endpoint !== "string" || candidate.endpoint.length === 0) return null;
+  if (typeof candidate.keys?.p256dh !== "string" || typeof candidate.keys.auth !== "string") {
+    return null;
+  }
+  return {
+    endpoint: candidate.endpoint,
+    keys: { p256dh: candidate.keys.p256dh, auth: candidate.keys.auth },
+  };
+}
+
 export async function saveSubscription(subscription: PushSubscription): Promise<void> {
   await ensureTable();
   await sql()`
@@ -62,11 +80,15 @@ export async function sendPushToAll(payload: { title: string; body: string }): P
 
   await Promise.all(
     rows.map(async (row) => {
+      // Drop rows that can never send (e.g. stored before validation existed)
+      // instead of failing local validation on every delivery.
+      const subscription = parseSubscription(row.subscription);
+      if (subscription === null) {
+        await deleteSubscription(row.endpoint as string);
+        return;
+      }
       try {
-        await webpush.sendNotification(
-          row.subscription as PushSubscription,
-          JSON.stringify(payload),
-        );
+        await webpush.sendNotification(subscription, JSON.stringify(payload));
       } catch (error) {
         if (error instanceof WebPushError && (error.statusCode === 404 || error.statusCode === 410)) {
           await deleteSubscription(row.endpoint as string);

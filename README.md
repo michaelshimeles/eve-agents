@@ -59,6 +59,7 @@ See [`apps/eve/.env.example`](apps/eve/.env.example) for the full annotated list
 
 | Variable | Used for |
 | --- | --- |
+| `EVE_WEB_USERNAME`, `EVE_WEB_PASSWORD` | HTTP Basic auth for the API routes in production |
 | `DATABASE_URL` | Neon Postgres (threads, reminders, webhooks, receipts, push) |
 | `SUPERMEMORY_API_KEY` | Long-term memory |
 | `COMPOSIO_API_KEY` | App integrations |
