@@ -11,7 +11,8 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": ["DATABASE_URL", "EVE_*", "SUPERMEMORY_*", "TELEGRAM_*", "BLOB_*", "VERCEL_*", "COMPOSIO_*", "AI_GATEWAY_*"]
     }
   }
 }
