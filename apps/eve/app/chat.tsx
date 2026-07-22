@@ -828,7 +828,7 @@ function ChatApp() {
       )}
 
       <Dialog.Root open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <Dialog size="sm" className="p-6">
+        <Dialog size="base" className="p-6">
           <Dialog.Title>Delete thread?</Dialog.Title>
           <Dialog.Description className="mt-2 text-kumo-subtle">
             &ldquo;{threadToDelete?.title}&rdquo; and its local history will be removed. This
@@ -1507,6 +1507,30 @@ function ChatThread({
   );
 }
 
+/**
+ * Provider mark rendered from the models.dev logo set. The SVGs are drawn
+ * with `fill="currentColor"`, which an <img> would rasterize as black, so
+ * the logo is applied as a CSS mask over the button's text color instead.
+ * A hidden <img> probes availability; unknown providers fall back to their
+ * two-letter initials.
+ */
+function ProviderLogo({ provider }: { provider: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = `https://models.dev/logos/${encodeURIComponent(provider)}.svg`;
+  if (failed) return <>{provider.slice(0, 2)}</>;
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt="" hidden onError={() => setFailed(true)} />
+      <span
+        aria-hidden
+        className="size-4 bg-current [mask-position:center] [mask-repeat:no-repeat] [mask-size:contain]"
+        style={{ maskImage: `url(${src})` }}
+      />
+    </>
+  );
+}
+
 function ModelPicker({
   model,
   models,
@@ -1599,7 +1623,7 @@ function ModelPicker({
             <div
               role="tablist"
               aria-label="Filter by provider"
-              className="flex max-h-80 w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-e border-kumo-hairline p-1.5"
+              className="flex max-h-80 w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-e border-kumo-hairline p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <button
                 type="button"
@@ -1633,11 +1657,15 @@ function ModelPicker({
                     setProviderFilter((prev) => (prev === provider ? null : provider))
                   }
                 >
-                  {provider.slice(0, 2)}
+                  <ProviderLogo provider={provider} />
                 </button>
               ))}
             </div>
-            <div role="listbox" aria-label="Models" className="max-h-80 min-w-0 flex-1 overflow-y-auto p-1.5">
+            <div
+              role="listbox"
+              aria-label="Models"
+              className="max-h-80 min-w-0 flex-1 overflow-y-auto p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
               {filtered.length === 0 && (
                 <p className="px-2 py-2 text-xs text-kumo-subtle">
                   {models.length === 0
