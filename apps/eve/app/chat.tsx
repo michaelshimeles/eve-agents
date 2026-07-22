@@ -533,15 +533,16 @@ function ChatApp() {
 
   // Resolve the active thread's chat: localStorage first, then the server
   // (for threads that live on another device or after cleared storage).
+  // Local hits resolve during render so switching threads never paints the
+  // intermediate spinner frame.
+  if (activeChat?.threadId !== index.activeId) {
+    const local = loadSavedChat(index.activeId);
+    if (local) setActiveChat({ threadId: index.activeId, chat: local });
+  }
   useEffect(() => {
     const threadId = index.activeId;
-    const local = loadSavedChat(threadId);
-    if (local) {
-      setActiveChat({ threadId, chat: local });
-      return;
-    }
+    if (loadSavedChat(threadId)) return;
     let cancelled = false;
-    setActiveChat(null);
     void fetchServerChat(threadId).then((chat) => {
       if (cancelled) return;
       if (chat) saveLocalChat(threadId, chat);
@@ -847,10 +848,10 @@ function SidebarThread({
           active && "bg-sidebar-accent text-sidebar-accent-foreground",
         )}
       >
-        <span className="flex items-center gap-1.5">
+        <span className="relative flex items-center">
           {busy && (
             <span
-              className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary"
+              className="absolute -start-1 size-1.5 shrink-0 -translate-x-full animate-pulse rounded-full bg-primary"
               role="status"
               aria-label="Turn in progress"
             />
@@ -1405,11 +1406,9 @@ function ChatThread({
               )}
             </div>
           </form>
-          {threadUsage.inputTokens > 0 && (
-            <p className="pt-2 text-center text-[11px] text-muted-foreground">
-              {formatUsage(threadUsage)} this thread
-            </p>
-          )}
+          <p className="h-6 pt-2 text-center text-[11px] text-muted-foreground">
+            {threadUsage.inputTokens > 0 ? `${formatUsage(threadUsage)} this thread` : "\u00A0"}
+          </p>
         </footer>
       </div>
     </main>
@@ -1443,16 +1442,16 @@ function ChatMessage({
         {message.parts.map((part, index) => (
           <ChatPart key={index} part={part} role={message.role} onRespond={onRespond} />
         ))}
-        {assistantDone && text.length > 0 && (
-          <div className={actionRowClass}>
+        {message.role === "assistant" && text.length > 0 && (
+          <div className={cn(actionRowClass, !assistantDone && "invisible")}>
             <CopyButton text={text} />
             {usage && (
               <span className="text-[11px] text-muted-foreground">{formatUsage(usage)}</span>
             )}
           </div>
         )}
-        {message.role === "user" && showUserActions && text.length > 0 && (
-          <div className={cn(actionRowClass, "justify-end")}>
+        {message.role === "user" && text.length > 0 && (
+          <div className={cn(actionRowClass, "justify-end", !showUserActions && "invisible")}>
             <CopyButton text={text} />
             <Button
               variant="ghost"
