@@ -1,24 +1,16 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
 import { memoryStore } from "../lib/memory-store";
 
-const TIMEZONE = "America/Toronto";
-
-function currentTimeBlock(): string {
-  const now = new Date().toLocaleString("en-CA", {
-    timeZone: TIMEZONE,
-    dateStyle: "full",
-    timeStyle: "short",
-  });
-  return `Current date and time: ${now} (${TIMEZONE}).`;
-}
-
 function bulletList(items: string[]): string {
   return items.length === 0 ? "- (none yet)" : items.map((item) => `- ${item}`).join("\n");
 }
 
+// Resolving on session.started keeps the Supermemory round-trip off every
+// turn's critical path; the profile only changes slowly, and search_memory
+// covers anything saved mid-conversation.
 export default defineDynamic({
   events: {
-    "turn.started": async () => {
+    "session.started": async () => {
       let memoryBlock: string;
       try {
         const profile = await memoryStore.profile();
@@ -39,8 +31,6 @@ ${bulletList(profile.dynamic)}`;
 
       return defineInstructions({
         markdown: `
-${currentTimeBlock()}
-
 ${memoryBlock}
 
 This profile is a summary; use search_memory for details it does not cover.

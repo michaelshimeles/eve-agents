@@ -4,7 +4,7 @@ import { skillStore } from "../lib/skill-store";
 
 export default defineTool({
   description:
-    "Create or update a reusable skill: a named procedure you will follow in future conversations. Use when the user describes a repeatable workflow, routine, or format they want you to apply again later (e.g. how to run their weekly review). Saving with an existing name overwrites that skill. The skill becomes loadable from the next message onward.",
+    "Create or update a reusable skill: a named procedure you will follow in future conversations. Use when the user describes a repeatable workflow, routine, or format they want you to apply again later (e.g. how to run their weekly review). Saving with an existing name overwrites that skill. The skill takes effect in new conversations from then on.",
   inputSchema: z.object({
     name: z
       .string()

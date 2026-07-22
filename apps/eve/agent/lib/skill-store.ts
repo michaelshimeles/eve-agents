@@ -1,4 +1,5 @@
 import { get, put } from "@vercel/blob";
+import { swrCache } from "./swr-cache";
 
 export interface StoredSkill {
   name: string;
@@ -27,9 +28,13 @@ async function writeAll(skills: Record<string, StoredSkill>): Promise<void> {
   });
 }
 
+// The list is read on every turn to advertise chat-created skills; cache it
+// so the blob fetch stays off the turn's critical path.
+const listCache = swrCache(60_000, readAll);
+
 export const skillStore = {
   async list(): Promise<StoredSkill[]> {
-    const all = await readAll();
+    const all = await listCache.get();
     return Object.values(all).sort((a, b) => a.name.localeCompare(b.name));
   },
 
@@ -38,6 +43,7 @@ export const skillStore = {
     const stored: StoredSkill = { ...skill, updatedAt: new Date().toISOString() };
     all[skill.name] = stored;
     await writeAll(all);
+    listCache.invalidate();
     return stored;
   },
 
@@ -46,6 +52,7 @@ export const skillStore = {
     if (!(name in all)) return false;
     delete all[name];
     await writeAll(all);
+    listCache.invalidate();
     return true;
   },
 };
