@@ -7,6 +7,7 @@ import type { EveMessage, EveMessagePart } from "eve/react";
 import {
   ArrowUpIcon,
   CheckIcon,
+  ChevronDownIcon,
   CopyIcon,
   ExternalLinkIcon,
   FileIcon,
@@ -68,6 +69,21 @@ import { cn } from "@/lib/utils";
 
 const THREADS_KEY = "eve-web-threads";
 const LEGACY_CHAT_KEY = "eve-web-chat";
+const MODEL_KEY = "eve-web-model";
+const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5";
+
+interface ModelOption {
+  id: string;
+  name: string;
+}
+
+function loadSavedModel(): string {
+  try {
+    return localStorage.getItem(MODEL_KEY) ?? DEFAULT_MODEL_ID;
+  } catch {
+    return DEFAULT_MODEL_ID;
+  }
+}
 
 function chatKey(threadId: string): string {
   return `eve-web-chat:${threadId}`;
@@ -460,6 +476,27 @@ function ChatApp() {
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
   // Slash-command palette: built-ins plus skills saved from chat.
   const [commands, setCommands] = useState<SlashCommand[]>(BUILTIN_COMMANDS);
+  // Model picker: catalog from the Vercel AI Gateway, selection persisted.
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [model, setModel] = useState<string>(loadSavedModel);
+
+  useEffect(() => {
+    void fetch("/api/models")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { models?: ModelOption[] } | null) => {
+        if (body?.models?.length) setModels(body.models);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  function selectModel(id: string) {
+    setModel(id);
+    try {
+      localStorage.setItem(MODEL_KEY, id);
+    } catch {
+      // Storage unavailable; the selection still applies for this session.
+    }
+  }
 
   // Callbacks fired from ChatThread need the current meta, not the one
   // captured when the thread mounted.
@@ -748,6 +785,9 @@ function ChatApp() {
           onBusyChange={(busy) => setThreadBusy(index.activeId, busy)}
           onOpenSidebar={() => setSidebarOpen(true)}
           commands={commands}
+          model={model}
+          models={models}
+          onModelChange={selectModel}
         />
       ) : (
         <main className="flex h-dvh min-w-0 flex-1 items-center justify-center">
@@ -901,6 +941,9 @@ function ChatThread({
   onBusyChange,
   onOpenSidebar,
   commands,
+  model,
+  models,
+  onModelChange,
 }: {
   threadId: string;
   initialChat: SavedChat;
@@ -910,6 +953,9 @@ function ChatThread({
   onBusyChange: (busy: boolean) => void;
   onOpenSidebar: () => void;
   commands: SlashCommand[];
+  model: string;
+  models: ModelOption[];
+  onModelChange: (id: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -933,6 +979,9 @@ function ChatThread({
   const agent = useEveAgent({
     initialEvents: initialChat.events ?? [],
     initialSession: initialChat.session,
+    // Ride the selected gateway model along with every turn; the agent's
+    // dynamic model resolver reads it from the turn's client context.
+    prepareSend: (input) => ({ ...input, clientContext: { eveWebModel: model } }),
     onFinish(snapshot) {
       onPersist({ events: snapshot.events, session: snapshot.session });
       onActivity();
@@ -1302,6 +1351,7 @@ function ChatThread({
               </AttachmentGroup>
             )}
             <div className="flex items-end gap-2 ps-2">
+              <ModelPicker model={model} models={models} onSelect={onModelChange} />
               <Textarea
                 ref={composerRef}
                 value={draft}
@@ -1412,6 +1462,104 @@ function ChatThread({
         </footer>
       </div>
     </main>
+  );
+}
+
+function ModelPicker({
+  model,
+  models,
+  onSelect,
+}: {
+  model: string;
+  models: ModelOption[];
+  onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close when clicking anywhere outside the picker.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? models.filter(
+        (option) =>
+          option.id.toLowerCase().includes(needle) ||
+          option.name.toLowerCase().includes(needle),
+      )
+    : models;
+  const label = models.find((option) => option.id === model)?.name ?? model.split("/").pop() ?? model;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <Button
+        type="button"
+        variant="ghost"
+        aria-label="Select model"
+        aria-expanded={open}
+        className="max-w-40 text-muted-foreground hover:text-foreground"
+        onClick={() => {
+          setOpen((prev) => !prev);
+          setQuery("");
+        }}
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDownIcon data-icon="inline-end" />
+      </Button>
+      {open && (
+        <div className="absolute bottom-full start-0 z-30 mb-2 w-72 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-md">
+          <div className="border-b p-1.5">
+            <input
+              autoFocus
+              value={query}
+              placeholder="Search models..."
+              aria-label="Search models"
+              className="w-full bg-transparent px-1.5 py-1 text-sm outline-none placeholder:text-muted-foreground"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setOpen(false);
+              }}
+            />
+          </div>
+          <div role="listbox" aria-label="Models" className="max-h-64 overflow-y-auto p-1">
+            {filtered.length === 0 && (
+              <p className="px-2 py-2 text-xs text-muted-foreground">
+                {models.length === 0 ? "Model list unavailable." : "No models match."}
+              </p>
+            )}
+            {filtered.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="option"
+                aria-selected={option.id === model}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  onSelect(option.id);
+                  setOpen(false);
+                }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{option.name}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {option.id}
+                  </span>
+                </span>
+                {option.id === model && <CheckIcon className="size-3.5 shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
