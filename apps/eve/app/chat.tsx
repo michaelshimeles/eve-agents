@@ -23,6 +23,7 @@ import {
   SearchIcon,
   SparklesIcon,
   SquareIcon,
+  StarIcon,
   Trash2Icon,
   WrenchIcon,
   XIcon,
@@ -75,6 +76,32 @@ const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5";
 interface ModelOption {
   id: string;
   name: string;
+  description?: string | null;
+  pricing?: { input: string; output: string } | null;
+}
+
+const MODEL_FAVORITES_KEY = "eve-web-model-favorites";
+
+function loadModelFavorites(): string[] {
+  try {
+    const raw = localStorage.getItem(MODEL_FAVORITES_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function modelProvider(id: string): string {
+  return id.split("/")[0] ?? id;
+}
+
+/** Rough cost tier from the per-token input price: $ under $1/M, $$ under $5/M, $$$ above. */
+function priceTier(pricing: ModelOption["pricing"]): string {
+  const perToken = Number(pricing?.input);
+  if (!Number.isFinite(perToken) || perToken <= 0) return "";
+  const perMillion = perToken * 1_000_000;
+  return perMillion < 1 ? "$" : perMillion < 5 ? "$$" : "$$$";
 }
 
 function loadSavedModel(): string {
@@ -1476,6 +1503,9 @@ function ModelPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // null shows every provider; "favorites" narrows to starred models.
+  const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [favorites, setFavorites] = useState<string[]>(loadModelFavorites);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Close when clicking anywhere outside the picker.
@@ -1488,14 +1518,34 @@ function ModelPicker({
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [open]);
 
+  function toggleFavorite(id: string) {
+    setFavorites((prev) => {
+      const next = prev.includes(id) ? prev.filter((entry) => entry !== id) : [...prev, id];
+      try {
+        localStorage.setItem(MODEL_FAVORITES_KEY, JSON.stringify(next));
+      } catch {
+        // Storage unavailable; favorites still apply for this session.
+      }
+      return next;
+    });
+  }
+
+  const providers = [...new Set(models.map((option) => modelProvider(option.id)))].sort();
   const needle = query.trim().toLowerCase();
-  const filtered = needle
-    ? models.filter(
-        (option) =>
-          option.id.toLowerCase().includes(needle) ||
-          option.name.toLowerCase().includes(needle),
-      )
-    : models;
+  const filtered = models.filter((option) => {
+    if (providerFilter === "favorites" && !favorites.includes(option.id)) return false;
+    if (
+      providerFilter !== null &&
+      providerFilter !== "favorites" &&
+      modelProvider(option.id) !== providerFilter
+    )
+      return false;
+    return (
+      needle.length === 0 ||
+      option.id.toLowerCase().includes(needle) ||
+      option.name.toLowerCase().includes(needle)
+    );
+  });
   const label = models.find((option) => option.id === model)?.name ?? model.split("/").pop() ?? model;
 
   return (
@@ -1515,47 +1565,118 @@ function ModelPicker({
         <ChevronDownIcon data-icon="inline-end" />
       </Button>
       {open && (
-        <div className="absolute bottom-full start-0 z-30 mb-2 w-72 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-md">
-          <div className="border-b p-1.5">
+        <div className="absolute bottom-full start-0 z-30 mb-2 flex w-[26rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-md">
+          <div className="flex items-center gap-2 border-b px-3 py-2">
+            <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
             <input
               autoFocus
               value={query}
               placeholder="Search models..."
               aria-label="Search models"
-              className="w-full bg-transparent px-1.5 py-1 text-sm outline-none placeholder:text-muted-foreground"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") setOpen(false);
               }}
             />
           </div>
-          <div role="listbox" aria-label="Models" className="max-h-64 overflow-y-auto p-1">
-            {filtered.length === 0 && (
-              <p className="px-2 py-2 text-xs text-muted-foreground">
-                {models.length === 0 ? "Model list unavailable." : "No models match."}
-              </p>
-            )}
-            {filtered.map((option) => (
+          <div className="flex min-h-0">
+            <div
+              role="tablist"
+              aria-label="Filter by provider"
+              className="flex max-h-80 w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-e p-1.5"
+            >
               <button
-                key={option.id}
                 type="button"
-                role="option"
-                aria-selected={option.id === model}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                onClick={() => {
-                  onSelect(option.id);
-                  setOpen(false);
-                }}
+                role="tab"
+                aria-selected={providerFilter === "favorites"}
+                aria-label="Favorites"
+                title="Favorites"
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+                  providerFilter === "favorites" && "bg-accent text-accent-foreground",
+                )}
+                onClick={() =>
+                  setProviderFilter((prev) => (prev === "favorites" ? null : "favorites"))
+                }
               >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">{option.name}</span>
-                  <span className="block truncate text-[11px] text-muted-foreground">
-                    {option.id}
-                  </span>
-                </span>
-                {option.id === model && <CheckIcon className="size-3.5 shrink-0" />}
+                <StarIcon className="size-4" />
               </button>
-            ))}
+              {providers.map((provider) => (
+                <button
+                  key={provider}
+                  type="button"
+                  role="tab"
+                  aria-selected={providerFilter === provider}
+                  aria-label={provider}
+                  title={provider}
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold uppercase text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+                    providerFilter === provider && "bg-accent text-accent-foreground",
+                  )}
+                  onClick={() =>
+                    setProviderFilter((prev) => (prev === provider ? null : provider))
+                  }
+                >
+                  {provider.slice(0, 2)}
+                </button>
+              ))}
+            </div>
+            <div role="listbox" aria-label="Models" className="max-h-80 min-w-0 flex-1 overflow-y-auto p-1.5">
+              {filtered.length === 0 && (
+                <p className="px-2 py-2 text-xs text-muted-foreground">
+                  {models.length === 0
+                    ? "Model list unavailable."
+                    : providerFilter === "favorites" && favorites.length === 0
+                      ? "No favorites yet. Star a model to pin it here."
+                      : "No models match."}
+                </p>
+              )}
+              {filtered.map((option) => {
+                const tier = priceTier(option.pricing);
+                const starred = favorites.includes(option.id);
+                return (
+                  <div
+                    key={option.id}
+                    className="group/model relative rounded-lg transition-colors hover:bg-accent"
+                  >
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={option.id === model}
+                      className="w-full px-2 py-1.5 pe-14 text-start"
+                      onClick={() => {
+                        onSelect(option.id);
+                        setOpen(false);
+                      }}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span className="truncate text-sm font-medium">{option.name}</span>
+                        {tier && (
+                          <span className="shrink-0 text-[11px] text-muted-foreground">{tier}</span>
+                        )}
+                        {option.id === model && <CheckIcon className="size-3.5 shrink-0" />}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {option.description || option.id}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={starred ? `Unfavorite ${option.name}` : `Favorite ${option.name}`}
+                      aria-pressed={starred}
+                      className={cn(
+                        "absolute end-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition-opacity hover:text-foreground",
+                        starred ? "text-yellow-500 hover:text-yellow-500" : "opacity-0 group-hover/model:opacity-100",
+                      )}
+                      onClick={() => toggleFavorite(option.id)}
+                    >
+                      <StarIcon className={cn("size-4", starred && "fill-current")} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
