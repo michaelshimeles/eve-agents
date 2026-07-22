@@ -11,32 +11,50 @@ function sql(): NeonQueryFunction<false, false> {
 }
 
 async function ensureTable(): Promise<void> {
-  ensured ??= sql()`
-    CREATE TABLE IF NOT EXISTS web_chat_threads (
-      id text PRIMARY KEY,
-      title text NOT NULL,
-      updated_at bigint NOT NULL,
-      chat jsonb NOT NULL DEFAULT '{}'::jsonb
-    )
-  `.then(() => undefined);
+  ensured ??= (async () => {
+    await sql()`
+      CREATE TABLE IF NOT EXISTS web_chat_threads (
+        id text PRIMARY KEY,
+        title text NOT NULL,
+        updated_at bigint NOT NULL,
+        chat jsonb NOT NULL DEFAULT '{}'::jsonb
+      )
+    `;
+    await sql()`
+      ALTER TABLE web_chat_threads
+        ADD COLUMN IF NOT EXISTS pinned boolean NOT NULL DEFAULT false
+    `;
+    await sql()`
+      ALTER TABLE web_chat_threads
+        ADD COLUMN IF NOT EXISTS renamed boolean NOT NULL DEFAULT false
+    `;
+  })();
   await ensured;
 }
 
-export interface ThreadRow {
-  id: string;
+export interface ThreadMetaRow {
   title: string;
   updatedAt: number;
+  pinned: boolean;
+  renamed: boolean;
+}
+
+export interface ThreadRow extends ThreadMetaRow {
+  id: string;
 }
 
 export async function listThreads(): Promise<ThreadRow[]> {
   await ensureTable();
   const rows = await sql()`
-    SELECT id, title, updated_at FROM web_chat_threads ORDER BY updated_at DESC
+    SELECT id, title, updated_at, pinned, renamed
+    FROM web_chat_threads ORDER BY updated_at DESC
   `;
   return rows.map((row) => ({
     id: row.id as string,
     title: row.title as string,
     updatedAt: Number(row.updated_at),
+    pinned: Boolean(row.pinned),
+    renamed: Boolean(row.renamed),
   }));
 }
 
@@ -49,18 +67,34 @@ export async function getThreadChat(id: string): Promise<unknown | null> {
 
 export async function upsertThread(
   id: string,
-  title: string,
-  updatedAt: number,
+  meta: ThreadMetaRow,
   chat: unknown,
 ): Promise<void> {
   await ensureTable();
   await sql()`
-    INSERT INTO web_chat_threads (id, title, updated_at, chat)
-    VALUES (${id}, ${title}, ${updatedAt}, ${JSON.stringify(chat)}::jsonb)
+    INSERT INTO web_chat_threads (id, title, updated_at, pinned, renamed, chat)
+    VALUES (${id}, ${meta.title}, ${meta.updatedAt}, ${meta.pinned}, ${meta.renamed},
+            ${JSON.stringify(chat)}::jsonb)
     ON CONFLICT (id) DO UPDATE
       SET title = EXCLUDED.title,
           updated_at = EXCLUDED.updated_at,
+          pinned = EXCLUDED.pinned,
+          renamed = EXCLUDED.renamed,
           chat = EXCLUDED.chat
+  `;
+}
+
+/** Updates thread metadata (rename, pin) without touching the chat payload. */
+export async function upsertThreadMeta(id: string, meta: ThreadMetaRow): Promise<void> {
+  await ensureTable();
+  await sql()`
+    INSERT INTO web_chat_threads (id, title, updated_at, pinned, renamed)
+    VALUES (${id}, ${meta.title}, ${meta.updatedAt}, ${meta.pinned}, ${meta.renamed})
+    ON CONFLICT (id) DO UPDATE
+      SET title = EXCLUDED.title,
+          updated_at = EXCLUDED.updated_at,
+          pinned = EXCLUDED.pinned,
+          renamed = EXCLUDED.renamed
   `;
 }
 

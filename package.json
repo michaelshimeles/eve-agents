@@ -1,0 +1,21 @@
+{
+  "name": "eve-agents",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "npm@11.16.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.10.5"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

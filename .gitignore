@@ -1,0 +1,6 @@
+node_modules
+.turbo
+.env*
+.DS_Store
+*.tsbuildinfo
+.vercel

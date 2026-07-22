@@ -1,4 +1,4 @@
-import { deleteThread, getThreadChat, upsertThread } from "@/lib/threads-db";
+import { deleteThread, getThreadChat, upsertThread, upsertThreadMeta } from "@/lib/threads-db";
 import { requireWebAuth } from "@/lib/web-auth";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -19,18 +19,25 @@ export async function PUT(request: Request, ctx: RouteContext): Promise<Response
   const body = (await request.json().catch(() => null)) as {
     title?: unknown;
     updatedAt?: unknown;
+    pinned?: unknown;
+    renamed?: unknown;
     chat?: unknown;
   } | null;
-  if (
-    body === null ||
-    typeof body.title !== "string" ||
-    typeof body.updatedAt !== "number" ||
-    typeof body.chat !== "object" ||
-    body.chat === null
-  ) {
+  if (body === null || typeof body.title !== "string" || typeof body.updatedAt !== "number") {
     return new Response("Invalid body", { status: 400 });
   }
-  await upsertThread(id, body.title, body.updatedAt, body.chat);
+  const meta = {
+    title: body.title,
+    updatedAt: body.updatedAt,
+    pinned: body.pinned === true,
+    renamed: body.renamed === true,
+  };
+  // Meta-only updates (rename, pin) omit the chat payload to leave it intact.
+  if (typeof body.chat === "object" && body.chat !== null) {
+    await upsertThread(id, meta, body.chat);
+  } else {
+    await upsertThreadMeta(id, meta);
+  }
   return Response.json({ ok: true });
 }
 
