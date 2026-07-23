@@ -196,6 +196,9 @@ export function BuilderWizard() {
   const [supermemoryKey, setSupermemoryKey] = useState("");
   const [composioKey, setComposioKey] = useState("");
   const [blobToken, setBlobToken] = useState("");
+  // The token+team the store list was fetched for, so we refetch when the
+  // deploy scope changes instead of showing another account's storage.
+  const storesScopeRef = useRef<string | null>(null);
 
   // Step 8: deploy
   const [phase, setPhase] = useState<DeployPhase>({ kind: "idle" });
@@ -268,6 +271,9 @@ export function BuilderWizard() {
   );
 
   function loadStores() {
+    const scope = `${token.trim()}::${teamId ?? ""}`;
+    storesScopeRef.current = scope;
+    setStores(null);
     setStoresError(null);
     void fetch("/api/stores", {
       method: "POST",
@@ -277,13 +283,18 @@ export function BuilderWizard() {
       .then(async (response) => {
         const body = (await response.json()) as AccountStores & { error?: string };
         if (!response.ok) throw new Error(body.error ?? "Could not list storage");
+        // A scope change mid-flight wins; drop this stale response.
+        if (storesScopeRef.current !== scope) return;
         setStores(body);
-        // Default to provisioning a fresh database on their account.
-        setPostgresChoice((current) => (current !== "" ? current : "create"));
+        // Fresh scope resets the picker: default to a new database + Blob store.
+        setPostgresChoice("create");
+        setBlobChoice("create");
       })
       .catch((error: unknown) => {
+        if (storesScopeRef.current !== scope) return;
         setStores({ databases: [], blobStores: [] });
-        setPostgresChoice((current) => (current === "" ? "manual" : current));
+        setPostgresChoice("manual");
+        setBlobChoice("create");
         setStoresError(error instanceof Error ? error.message : String(error));
       });
   }
@@ -334,7 +345,9 @@ export function BuilderWizard() {
     if (STEPS[next] === "Instructions" && !instructionsEdited) {
       setInstructions(regenerateInstructions());
     }
-    if (STEPS[next] === "Keys" && stores === null) {
+    // Refetch when first entering Keys or when the deploy scope (token/team)
+    // changed since the list was last loaded.
+    if (STEPS[next] === "Keys" && storesScopeRef.current !== `${token.trim()}::${teamId ?? ""}`) {
       loadStores();
     }
     if (STEPS[next] === "Deploy") {

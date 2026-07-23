@@ -188,7 +188,7 @@ function RunHistory({
           {run.threadId !== null && (
             <button
               type="button"
-              className="flex items-center gap-1 text-gray-a4 hover:underline"
+              className="flex items-center gap-1 text-accent-11 hover:underline"
               onClick={() => onOpenThread(run.threadId!)}
             >
               Open thread
