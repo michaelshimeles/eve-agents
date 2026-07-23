@@ -444,7 +444,7 @@ export function BuilderWizard() {
               sessionOk?: boolean;
               sessionError?: string | null;
               telegramWebhook?: "set" | "failed" | null;
-              publicUrl?: string;
+              publicUrl?: string | null;
             } | null;
             setPhase({
               kind: "ready",
@@ -1231,8 +1231,8 @@ export function BuilderWizard() {
                   <Callout.Description>
                     {phase.sessionOk
                       ? "Health check and a test message both passed — the agent is warmed up and ready."
-                      : phase.sessionError === "finalize-failed"
-                        ? "The deploy finished, but the post-deploy verification couldn't run, so the link below may be the deployment-specific URL — that one requires your Vercel login. Find the public production domain on the project page in your Vercel dashboard and try the chat there."
+                      : phase.sessionError === "finalize-failed" || phase.sessionError === "no-alias"
+                        ? "The deploy finished, but the post-deploy verification couldn't run against a public domain, so the link below may be the deployment-specific URL — that one requires your Vercel login. Find the public production domain on the project page in your Vercel dashboard and try the chat there."
                         : phase.sessionError === "protected"
                         ? "This project has Vercel Deployment Protection enabled, so the chat requires Vercel SSO — it works for you while logged into Vercel, but not for anyone else. To share it publicly, disable Deployment Protection in the project's settings."
                         : /channel handler/i.test(phase.sessionError ?? "")

@@ -54,20 +54,38 @@ export async function POST(request: Request): Promise<Response> {
   }
   const teamId = typeof body.teamId === "string" && body.teamId.length > 0 ? body.teamId : null;
 
-  let publicUrl: string;
+  // Deployment-id URLs sit behind Vercel SSO by default (Standard
+  // Protection); the production alias is the publicly reachable — and
+  // shareable — address. Alias assignment can lag READY by a moment, so
+  // retry briefly, and if none appears, report that instead of verifying
+  // against (and returning) the protected deployment URL.
+  let publicUrl: string | null = null;
   try {
-    const deployment = await getDeploymentStatus(body.token, teamId, body.deploymentId);
-    if (deployment.readyState !== "READY" || deployment.url.length === 0) {
-      return Response.json({ error: "Deployment is not ready" }, { status: 409 });
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const deployment = await getDeploymentStatus(body.token, teamId, body.deploymentId);
+      if (deployment.readyState !== "READY" || deployment.url.length === 0) {
+        return Response.json({ error: "Deployment is not ready" }, { status: 409 });
+      }
+      // Prefer the shortest alias (the clean production domain).
+      const alias = [...deployment.aliases].sort((a, b) => a.length - b.length)[0];
+      if (alias !== undefined) {
+        publicUrl = alias;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     }
-    // Deployment-id URLs sit behind Vercel SSO by default (Standard
-    // Protection); the production alias is the publicly reachable — and
-    // shareable — address. Prefer the shortest alias (the clean one).
-    const alias = [...deployment.aliases].sort((a, b) => a.length - b.length)[0];
-    publicUrl = alias ?? deployment.url;
   } catch (error) {
     const message = error instanceof VercelApiError ? error.message : "Could not verify deployment";
     return Response.json({ error: message }, { status: 502 });
+  }
+  if (publicUrl === null) {
+    return Response.json({
+      healthy: false,
+      sessionOk: false,
+      sessionError: "no-alias",
+      telegramWebhook: null,
+      publicUrl: null,
+    });
   }
   const base = `https://${publicUrl}`;
 
