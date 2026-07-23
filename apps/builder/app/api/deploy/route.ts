@@ -68,6 +68,20 @@ function buildEnv(config: AgentConfig): EnvVar[] {
 }
 
 /**
+ * Store names must be unique across the account, and a redeploy (or a
+ * deleted-then-recreated project) would otherwise try to reuse the same
+ * name and fail. A UTC timestamp suffix keeps every provisioned store
+ * distinct; the project-name prefix is truncated so the whole name stays
+ * within Vercel's 32-character store name limit.
+ */
+function uniqueStoreName(projectName: string, kind: "db" | "blob"): string {
+  const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14); // YYYYMMDDHHMMSS
+  const suffix = `-${kind}-${stamp}`;
+  const prefix = projectName.slice(0, 32 - suffix.length).replace(/[-._]+$/, "");
+  return `${prefix}${suffix}`;
+}
+
+/**
  * Connects the selected stores to the project and verifies Vercel injected
  * the env vars the agent needs — the safety net for picking a database whose
  * integration doesn't provide DATABASE_URL.
@@ -82,7 +96,11 @@ async function connectStorage(
   const wantBlob = requiredKeys(config.features).blob;
 
   if (config.postgres.mode === "create") {
-    const storeId = await provisionNeonDatabase(token, teamId, `${projectName}-db`);
+    const storeId = await provisionNeonDatabase(
+      token,
+      teamId,
+      uniqueStoreName(projectName, "db"),
+    );
     await connectStoreToProject(token, teamId, storeId, projectId);
   } else if (config.postgres.mode === "connect") {
     await connectStoreToProject(token, teamId, config.postgres.storeId, projectId);
@@ -90,7 +108,7 @@ async function connectStorage(
   if (wantBlob && config.blob.mode !== "manual") {
     const storeId =
       config.blob.mode === "create"
-        ? await createBlobStore(token, teamId, `${projectName}-blob`)
+        ? await createBlobStore(token, teamId, uniqueStoreName(projectName, "blob"))
         : config.blob.storeId;
     await connectStoreToProject(token, teamId, storeId, projectId);
   }
