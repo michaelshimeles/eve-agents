@@ -70,12 +70,12 @@ function buildEnv(config: AgentConfig): EnvVar[] {
 /**
  * Store names must be unique across the account, and a redeploy (or a
  * deleted-then-recreated project) would otherwise try to reuse the same
- * name and fail. A UTC timestamp suffix keeps every provisioned store
- * distinct; the project-name prefix is truncated so the whole name stays
- * within Vercel's 32-character store name limit.
+ * name and fail. A random hex suffix keeps every provisioned store
+ * distinct even under concurrent creates; the project-name prefix is
+ * truncated so the whole name stays within Vercel's 32-character limit.
  */
 function uniqueStoreName(projectName: string, kind: "db" | "blob"): string {
-  const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14); // YYYYMMDDHHMMSS
+  const stamp = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
   const suffix = `-${kind}-${stamp}`;
   const prefix = projectName.slice(0, 32 - suffix.length).replace(/[-._]+$/, "");
   return `${prefix}${suffix}`;
