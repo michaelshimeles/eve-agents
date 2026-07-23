@@ -1,8 +1,20 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
 
-import { BuilderHome } from "@/components/builder-home";
+import { BuilderWizard } from "@/components/wizard";
 
-export default function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ update?: string }>;
+}) {
+  const params = await searchParams;
+  // Older agent banners deep-linked here with ?update=<project>. Send them
+  // to the dedicated update page.
+  const legacy = params.update?.trim();
+  if (legacy !== undefined && legacy.length > 0) {
+    redirect(`/update?project=${encodeURIComponent(legacy)}`);
+  }
+
   return (
     <main className="min-h-dvh">
       <header className="border-b border-gray-a4">
@@ -13,10 +25,7 @@ export default function HomePage() {
           </p>
         </div>
       </header>
-      {/* Suspense boundary for useSearchParams (?update=<project> deep links). */}
-      <Suspense fallback={null}>
-        <BuilderHome />
-      </Suspense>
+      <BuilderWizard />
     </main>
   );
 }

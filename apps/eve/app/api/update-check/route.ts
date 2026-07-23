@@ -81,7 +81,7 @@ export async function GET(request: Request): Promise<Response> {
 
     const projectName = process.env.EVE_PROJECT_NAME ?? "";
     const updateUrl = new URL(
-      projectName.length > 0 ? `/?update=${encodeURIComponent(projectName)}` : "/",
+      projectName.length > 0 ? `/update?project=${encodeURIComponent(projectName)}` : "/update",
       builderUrl,
     ).toString();
     return Response.json({

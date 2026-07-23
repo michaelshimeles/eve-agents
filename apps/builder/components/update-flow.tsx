@@ -7,8 +7,8 @@ import { useEffect, useRef, useState } from "react";
 // The update flow: paste a token, pick the agent's project, one click.
 // Everything the redeploy needs (features, instructions, custom schedules)
 // is read back from the deployed agent itself by /api/update, so nothing has
-// to be re-entered and nothing is ever stored. Deployed agents link here
-// with ?update=<project> prefilled when they detect a newer template.
+// to be re-entered and nothing is ever stored. Deployed agents deep-link to
+// /update?project=<name> when they detect a newer template.
 
 interface Identity {
   user: { id: string; username: string; email?: string };
