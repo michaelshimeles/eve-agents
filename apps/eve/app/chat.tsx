@@ -1083,15 +1083,17 @@ function ChatApp({ initialView }: { initialView: MainView }) {
 
       {view === "manage" ? (
         <main className="relative h-dvh min-w-0 flex-1 overflow-y-auto">
-          <Button
-            variant="ghost"
-            size="sm"
-            shape="square"
-            icon={SidebarSimpleIcon}
-            className="absolute start-2 top-2 z-20 md:hidden"
-            aria-label="Open threads"
-            onClick={() => setSidebarOpen(true)}
-          />
+          {/* Wrapper owns md:hidden — Button's display styles can override a class on the button itself. */}
+          <div className="absolute start-2 top-2 z-20 md:hidden">
+            <Button
+              variant="ghost"
+              size="sm"
+              shape="square"
+              icon={SidebarSimpleIcon}
+              aria-label="Open threads"
+              onClick={() => setSidebarOpen(true)}
+            />
+          </div>
           <div className="w-full max-w-3xl px-6 py-6">
             <header className="mb-5">
               <h1 className="text-lg font-semibold">Manage</h1>
@@ -1661,15 +1663,17 @@ function ChatThread({
         </div>
       )}
       <div className="mx-auto flex size-full max-w-3xl min-h-0 flex-col px-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          shape="square"
-          icon={SidebarSimpleIcon}
-          className="absolute start-2 top-2 z-20 md:hidden"
-          aria-label="Open threads"
-          onClick={onOpenSidebar}
-        />
+        {/* Wrapper owns md:hidden — Button's display styles can override a class on the button itself. */}
+        <div className="absolute start-2 top-2 z-20 md:hidden">
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={SidebarSimpleIcon}
+            aria-label="Open threads"
+            onClick={onOpenSidebar}
+          />
+        </div>
 
         <MessageScrollerProvider autoScroll>
           <MessageScroller className="flex-1">
