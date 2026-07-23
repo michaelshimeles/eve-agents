@@ -2,12 +2,12 @@ import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
-import { Button } from "@cloudflare/kumo"
+import { Button } from "@/components/ui/compat"
 
 import { cn } from "@/lib/utils"
 
 const attachmentVariants = cva(
-  "group/attachment relative flex w-fit max-w-full min-w-0 shrink-0 flex-wrap rounded-lg bg-kumo-base ring ring-kumo-hairline focus-within:ring-kumo-focus/50 has-[>a,>button]:hover:bg-kumo-tint data-[state=error]:ring-kumo-danger/40",
+  "group/attachment relative flex w-fit max-w-full min-w-0 shrink-0 flex-wrap rounded-lg bg-panel ring ring-gray-a4 focus-within:ring-accent-8/50 has-[>a,>button]:hover:bg-gray-a3 data-[state=error]:ring-danger-9/40",
   {
     variants: {
       size: {
@@ -47,7 +47,7 @@ function Attachment({
 }
 
 const attachmentMediaVariants = cva(
-  "relative flex aspect-square w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-kumo-tint text-kumo-default group-data-[orientation=vertical]/attachment:w-full group-data-[size=sm]/attachment:w-8 group-data-[size=xs]/attachment:w-7 group-data-[size=xs]/attachment:rounded-sm group-data-[state=error]/attachment:bg-kumo-danger-tint group-data-[state=error]/attachment:text-kumo-danger [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 group-data-[orientation=vertical]/attachment:[&_svg:not([class*='size-'])]:size-6 group-data-[size=xs]/attachment:[&_svg:not([class*='size-'])]:size-3.5",
+  "relative flex aspect-square w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gray-a3 text-gray-12 group-data-[orientation=vertical]/attachment:w-full group-data-[size=sm]/attachment:w-8 group-data-[size=xs]/attachment:w-7 group-data-[size=xs]/attachment:rounded-sm group-data-[state=error]/attachment:bg-danger-a3 group-data-[state=error]/attachment:text-danger-11 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 group-data-[orientation=vertical]/attachment:[&_svg:not([class*='size-'])]:size-6 group-data-[size=xs]/attachment:[&_svg:not([class*='size-'])]:size-3.5",
   {
     variants: {
       variant: {
@@ -117,7 +117,7 @@ function AttachmentDescription({
     <span
       data-slot="attachment-description"
       className={cn(
-        "mt-0.5 block max-w-full min-w-0 truncate text-xs text-kumo-subtle group-data-[state=error]/attachment:text-kumo-danger",
+        "mt-0.5 block max-w-full min-w-0 truncate text-xs text-gray-11 group-data-[state=error]/attachment:text-danger-11",
         className
       )}
       {...props}

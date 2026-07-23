@@ -21,14 +21,14 @@ const bubbleVariants = cva(
     variants: {
       variant: {
         default:
-          "*:data-[slot=bubble-content]:bg-kumo-brand *:data-[slot=bubble-content]:text-white",
-        tint: "*:data-[slot=bubble-content]:bg-kumo-tint *:data-[slot=bubble-content]:text-kumo-default",
+          "*:data-[slot=bubble-content]:bg-accent-9 *:data-[slot=bubble-content]:text-white",
+        tint: "*:data-[slot=bubble-content]:bg-gray-a3 *:data-[slot=bubble-content]:text-gray-12",
         outline:
-          "*:data-[slot=bubble-content]:bg-kumo-base *:data-[slot=bubble-content]:ring *:data-[slot=bubble-content]:ring-kumo-hairline",
+          "*:data-[slot=bubble-content]:bg-panel *:data-[slot=bubble-content]:ring *:data-[slot=bubble-content]:ring-gray-a4",
         ghost:
           "*:data-[slot=bubble-content]:rounded-none *:data-[slot=bubble-content]:bg-transparent *:data-[slot=bubble-content]:p-0",
         destructive:
-          "*:data-[slot=bubble-content]:bg-kumo-danger-tint/70 *:data-[slot=bubble-content]:text-kumo-danger",
+          "*:data-[slot=bubble-content]:bg-danger-a3/70 *:data-[slot=bubble-content]:text-danger-11",
       },
     },
     defaultVariants: {
@@ -67,7 +67,7 @@ function BubbleContent({
     props: mergeProps<"div">(
       {
         className: cn(
-          "w-fit max-w-full min-w-0 overflow-hidden rounded-lg px-3 py-2 text-sm/relaxed wrap-break-word group-data-[align=end]/bubble:self-end [button]:text-left [button,a]:outline-none [button,a]:focus-visible:ring-2 [button,a]:focus-visible:ring-kumo-focus/30",
+          "w-fit max-w-full min-w-0 overflow-hidden rounded-lg px-3 py-2 text-sm/relaxed wrap-break-word group-data-[align=end]/bubble:self-end [button]:text-left [button,a]:outline-none [button,a]:focus-visible:ring-2 [button,a]:focus-visible:ring-accent-8/30",
           className
         ),
       },

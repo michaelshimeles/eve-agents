@@ -7,7 +7,7 @@ import {
   useMessageScrollerScrollable,
   useMessageScrollerVisibility,
 } from "@shadcn/react/message-scroller"
-import { Button } from "@cloudflare/kumo"
+import { Button } from "@/components/ui/compat"
 import { ArrowDownIcon } from "@phosphor-icons/react"
 
 import { cn } from "@/lib/utils"

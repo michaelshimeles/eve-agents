@@ -15,7 +15,6 @@
   "dependencies": {
     "@agent-browser/eve": "^0.32.3",
     "@base-ui/react": "^1.6.0",
-    "@cloudflare/kumo": "^2.8.0",
     "@neondatabase/serverless": "^1.1.0",
     "@phosphor-icons/react": "^2.1.10",
     "@shadcn/react": "^0.2.1",
@@ -26,6 +25,7 @@
     "clsx": "^2.1.1",
     "cron-parser": "^5.6.2",
     "eve": "^0.27.0",
+    "frosted-ui": "^0.0.1-canary.153",
     "next": "^16.2.11",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

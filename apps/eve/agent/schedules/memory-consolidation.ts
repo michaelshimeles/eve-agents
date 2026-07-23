@@ -1,5 +1,7 @@
 import { defineSchedule } from "eve/schedules";
 
+import { ownerName } from "../lib/owner";
+
 // Nightly "dreaming" pass over long-term memory (Supermemory): merge
 // duplicates, resolve contradictions, promote recurring signals to permanent,
 // and prune stale one-off context. Task mode: runs to completion with no
@@ -8,13 +10,13 @@ import { defineSchedule } from "eve/schedules";
 export default defineSchedule({
   cron: "15 8 * * *",
   markdown: `
-Nightly memory consolidation. Review your long-term memory about Micky and
+Nightly memory consolidation. Review your long-term memory about ${ownerName()} and
 tidy it. Work only through list_memories, remember, and forget; do not
 message anyone.
 
 1. Load everything with list_memories.
 2. Merge duplicates: when several entries say the same thing, save one entry
-   with the best phrasing (entity-centric, e.g. "Micky prefers window seats")
+   with the best phrasing (entity-centric, e.g. "${ownerName()} prefers window seats")
    using remember, then forget the redundant ones. Skip this when entries
    only look similar but carry distinct details.
 3. Resolve contradictions: when two entries conflict, keep the more recent

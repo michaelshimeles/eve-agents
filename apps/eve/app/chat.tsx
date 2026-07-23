@@ -4,7 +4,8 @@ import type { UserContent } from "ai";
 import type { HandleMessageStreamEvent, SessionState } from "eve/client";
 import { useEveAgent } from "eve/react";
 import type { EveMessage, EveMessagePart } from "eve/react";
-import { Button, Dialog, Input, InputArea, LinkButton, Loader } from "@cloudflare/kumo";
+import { Dialog, TextField } from "frosted-ui";
+import { Button, LinkButton, Loader } from "@/components/ui/compat";
 import {
   AlarmIcon,
   ArrowClockwiseIcon,
@@ -394,7 +395,7 @@ function CopyButton({ text, label = "Copy message" }: { text: string; label?: st
       shape="square"
       aria-label={label}
       icon={copied ? CheckIcon : CopyIcon}
-      className="text-kumo-subtle"
+      className="text-gray-11"
       onClick={() => {
         void navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
@@ -415,10 +416,10 @@ function ToolPayload({ label, value }: { label: string; value: unknown }) {
   if (!text || text === "{}" || text === "undefined") return null;
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[10px] font-medium tracking-wide text-kumo-subtle uppercase">
+      <span className="text-[10px] font-medium tracking-wide text-gray-11 uppercase">
         {label}
       </span>
-      <pre className="max-h-64 overflow-auto rounded-md bg-kumo-recessed p-2 font-mono text-xs break-words whitespace-pre-wrap text-kumo-subtle">
+      <pre className="max-h-64 overflow-auto rounded-md bg-gray-a2 p-2 font-mono text-xs break-words whitespace-pre-wrap text-gray-11">
         {text}
       </pre>
     </div>
@@ -515,7 +516,7 @@ export function Chat({ initialView = "chat" }: { initialView?: MainView } = {}) 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) {
-    return <main className="h-dvh bg-kumo-canvas" />;
+    return <main className="h-dvh bg-canvas" />;
   }
   return <ChatApp initialView={initialView} />;
 }
@@ -956,14 +957,14 @@ function ChatApp({ initialView }: { initialView: MainView }) {
 
       <aside
         className={cn(
-          "fixed inset-y-0 start-0 z-40 flex w-64 shrink-0 -translate-x-full flex-col border-e border-kumo-hairline bg-kumo-elevated transition-transform duration-200 md:static md:translate-x-0",
+          "fixed inset-y-0 start-0 z-40 flex w-64 shrink-0 -translate-x-full flex-col border-e border-gray-a4 bg-gray-2 transition-transform duration-200 md:static md:translate-x-0",
           sidebarOpen && "translate-x-0",
         )}
       >
         <div className="flex items-center justify-between px-3 py-2.5">
           <button
             type="button"
-            className="rounded-sm text-sm font-semibold hover:text-kumo-strong"
+            className="rounded-sm text-sm font-semibold hover:text-gray-12"
             aria-label="Back to chat"
             title="Back to chat"
             onClick={() => showView("chat")}
@@ -987,7 +988,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
                       ? "Notifications blocked in browser settings"
                       : "Enable notifications"
                 }
-                className={cn(push.status !== "on" && "text-kumo-subtle")}
+                className={cn(push.status !== "on" && "text-gray-11")}
                 onClick={push.toggle}
               />
             )}
@@ -999,7 +1000,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
               aria-label="Manage"
               aria-pressed={view === "manage"}
               title="Manage: reminders, triggers, memory, connections, skills"
-              className={cn(view === "manage" && "bg-kumo-tint text-kumo-strong")}
+              className={cn(view === "manage" && "bg-gray-a3 text-gray-12")}
               onClick={() => showView(view === "manage" ? "chat" : "manage")}
             />
             <Button
@@ -1015,19 +1016,19 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         </div>
         <div className="px-2 pb-2">
           <div className="relative">
-            <Input
-              size="sm"
+            <TextField.Input
+              size="2"
               value={searchQuery}
               placeholder="Search threads"
               aria-label="Search threads"
-              className="w-full pe-7 ring-kumo-hairline"
+              className="w-full"
               onChange={(event) => setSearchQuery(event.target.value)}
             />
             {searchQuery.length > 0 && (
               <button
                 type="button"
                 aria-label="Clear search"
-                className="absolute end-1.5 top-1/2 -translate-y-1/2 text-kumo-subtle hover:text-kumo-default"
+                className="absolute end-1.5 top-1/2 -translate-y-1/2 text-gray-11 hover:text-gray-12"
                 onClick={() => setSearchQuery("")}
               >
                 <XIcon className="size-3.5" />
@@ -1037,12 +1038,12 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         </div>
         <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {sections.every((section) => section.threads.length === 0) && (
-            <p className="px-2.5 py-2 text-xs text-kumo-subtle">No threads match.</p>
+            <p className="px-2.5 py-2 text-xs text-gray-11">No threads match.</p>
           )}
           {sections.map((section) => (
             <div key={section.label ?? "results"} className="pb-2">
               {section.label && (
-                <p className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-kumo-subtle">
+                <p className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-gray-11">
                   {section.label}
                 </p>
               )}
@@ -1094,7 +1095,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
           <div className="w-full max-w-3xl px-6 py-6">
             <header className="mb-5">
               <h1 className="text-lg font-semibold">Manage</h1>
-              <p className="text-sm text-kumo-subtle">
+              <p className="text-sm text-gray-11">
                 What Eve does and knows on her own. Create reminders, triggers, and skills by
                 asking in chat.
               </p>
@@ -1122,7 +1123,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
           onModelChange={selectModel}
         />
       ) : (
-        <main className="flex h-dvh min-w-0 flex-1 items-center justify-center text-kumo-subtle">
+        <main className="flex h-dvh min-w-0 flex-1 items-center justify-center text-gray-11">
           <Loader size={20} />
         </main>
       )}
@@ -1141,20 +1142,16 @@ function ChatApp({ initialView }: { initialView: MainView }) {
       />
 
       <Dialog.Root open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <Dialog size="base" className="p-6">
+        <Dialog.Content className="p-6">
           <Dialog.Title>Delete thread?</Dialog.Title>
-          <Dialog.Description className="mt-2 text-sm text-kumo-subtle">
+          <Dialog.Description className="mt-2 text-sm text-gray-11">
             &ldquo;{threadToDelete?.title}&rdquo; and its local history will be removed. This
             can&rsquo;t be undone.
           </Dialog.Description>
           <div className="mt-6 flex justify-end gap-2">
-            <Dialog.Close
-              render={(props) => (
-                <Button variant="secondary" size="sm" {...props}>
-                  Cancel
-                </Button>
-              )}
-            />
+            <Button variant="secondary" size="sm" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               size="sm"
@@ -1166,7 +1163,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
               Delete
             </Button>
           </div>
-        </Dialog>
+        </Dialog.Content>
       </Dialog.Root>
     </div>
   );
@@ -1208,7 +1205,7 @@ function SidebarThread({
           autoFocus
           defaultValue={thread.title}
           aria-label="Thread title"
-          className="w-full rounded-md bg-kumo-base px-2.5 py-2 text-sm text-kumo-default ring ring-kumo-focus outline-none"
+          className="w-full rounded-md bg-panel px-2.5 py-2 text-sm text-gray-12 ring ring-accent-8 outline-none"
           onFocus={(event) => event.currentTarget.select()}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
@@ -1238,42 +1235,42 @@ function SidebarThread({
         className={cn(
           // ps-4 leaves room for the busy/unread dot, which hangs to the
           // start of the title and would otherwise clip at the sidebar edge.
-          "w-full rounded-md py-1.5 pe-8 ps-4 text-start group-hover/thread:bg-kumo-tint",
-          active && "bg-kumo-tint text-kumo-strong",
+          "w-full rounded-md py-1.5 pe-8 ps-4 text-start group-hover/thread:bg-gray-a3",
+          active && "bg-gray-a3 text-gray-12",
         )}
       >
         <span className="relative flex items-center">
           {(busy || unread) && (
             <span
               className={cn(
-                "absolute -start-1 size-1.5 shrink-0 -translate-x-full rounded-full bg-kumo-brand rtl:translate-x-full",
+                "absolute -start-1 size-1.5 shrink-0 -translate-x-full rounded-full bg-accent-9 rtl:translate-x-full",
                 busy && "animate-pulse",
               )}
               role="status"
               aria-label={busy ? "Turn in progress" : "Unread activity"}
             />
           )}
-          <span className={cn("truncate text-sm", unread && "font-medium text-kumo-strong")}>
+          <span className={cn("truncate text-sm", unread && "font-medium text-gray-12")}>
             {thread.title}
           </span>
           {thread.origin === "reminder" && (
             <AlarmIcon
-              className="ms-1.5 size-3 shrink-0 text-kumo-subtle"
+              className="ms-1.5 size-3 shrink-0 text-gray-11"
               aria-label="Started by a reminder"
             />
           )}
           {thread.origin === "webhook" && (
             <LightningIcon
-              className="ms-1.5 size-3 shrink-0 text-kumo-subtle"
+              className="ms-1.5 size-3 shrink-0 text-gray-11"
               aria-label="Started by a webhook"
             />
           )}
         </span>
-        <span className="block text-xs text-kumo-subtle">
+        <span className="block text-xs text-gray-11">
           {formatThreadDate(thread.updatedAt)}
         </span>
       </button>
-      <div className="absolute end-1 top-1/2 flex -translate-y-1/2 items-center rounded-md bg-kumo-tint opacity-0 focus-within:opacity-100 group-hover/thread:opacity-100">
+      <div className="absolute end-1 top-1/2 flex -translate-y-1/2 items-center rounded-md bg-gray-a3 opacity-0 focus-within:opacity-100 group-hover/thread:opacity-100">
         <Button
           variant="ghost"
           size="sm"
@@ -1656,8 +1653,8 @@ function ChatThread({
       }}
     >
       {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-kumo-canvas/80 backdrop-blur-sm">
-          <div className="flex items-center gap-2 rounded-xl border-2 border-dashed border-kumo-interact px-8 py-6 text-sm font-medium">
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-canvas/80 backdrop-blur-sm">
+          <div className="flex items-center gap-2 rounded-xl border-2 border-dashed border-gray-a4 px-8 py-6 text-sm font-medium">
             <PaperclipIcon className="size-4" />
             Drop files to attach
           </div>
@@ -1680,8 +1677,8 @@ function ChatThread({
               <MessageScrollerContent className="gap-5 py-6">
                 {!hasMessages && (
                   <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-                    <h2 className="text-lg font-semibold text-kumo-default">Hey Micky</h2>
-                    <p className="max-w-sm text-sm text-kumo-subtle">
+                    <h2 className="text-lg font-semibold text-gray-12">Hey Micky</h2>
+                    <p className="max-w-sm text-sm text-gray-11">
                       Ask me anything — I have your memory, a browser, and all your connected apps.
                     </p>
                   </div>
@@ -1738,9 +1735,9 @@ function ChatThread({
             <div
               role="listbox"
               aria-label="Commands"
-              className="absolute inset-x-0 bottom-full z-20 mb-1 overflow-hidden rounded-lg bg-kumo-base shadow-lg ring ring-kumo-line"
+              className="absolute inset-x-0 bottom-full z-20 mb-1 overflow-hidden rounded-lg bg-panel shadow-lg ring ring-gray-a6"
             >
-              <p className="px-3 pt-2 pb-1 text-[11px] font-medium text-kumo-subtle">
+              <p className="px-3 pt-2 pb-1 text-[11px] font-medium text-gray-11">
                 Commands
               </p>
               <div className="max-h-64 overflow-y-auto pb-1">
@@ -1752,7 +1749,7 @@ function ChatThread({
                     aria-selected={commandIndex === activePaletteIndex}
                     className={cn(
                       "flex w-full items-baseline gap-2 px-3 py-2 text-start text-sm",
-                      commandIndex === activePaletteIndex && "bg-kumo-tint text-kumo-strong",
+                      commandIndex === activePaletteIndex && "bg-gray-a3 text-gray-12",
                     )}
                     // Keep the textarea focused; the click still fires.
                     onMouseDown={(event) => event.preventDefault()}
@@ -1760,7 +1757,7 @@ function ChatThread({
                     onClick={() => applyCommand(command)}
                   >
                     <span className="shrink-0 font-mono text-xs font-medium">/{command.name}</span>
-                    <span className="truncate text-xs text-kumo-subtle">
+                    <span className="truncate text-xs text-gray-11">
                       {command.description}
                     </span>
                   </button>
@@ -1769,7 +1766,7 @@ function ChatThread({
             </div>
           )}
           <form
-            className="rounded-xl bg-kumo-base p-2 ring ring-kumo-hairline focus-within:ring-kumo-focus/40"
+            className="rounded-xl bg-panel p-2 ring ring-gray-a4 focus-within:ring-accent-8/40"
             onSubmit={(event) => {
               event.preventDefault();
               sendDraft();
@@ -1806,15 +1803,13 @@ function ChatThread({
                 ))}
               </AttachmentGroup>
             )}
-            <InputArea
+            <textarea
               ref={composerRef}
               value={draft}
               aria-label="Message Eve"
               placeholder="Message Eve... (/ for commands)"
-              autoResize
-              minRows={1}
-              maxRows={7}
-              className="w-full rounded-none bg-transparent px-1 text-sm ring-0 focus:ring-0"
+              rows={1}
+              className="field-sizing-content max-h-44 w-full resize-none rounded-none bg-transparent px-1 text-sm outline-none placeholder:text-gray-a9"
               onChange={(event) => {
                 setDraft(event.target.value);
                 setPaletteDismissed(false);
@@ -1874,7 +1869,7 @@ function ChatThread({
                 icon={PlusIcon}
                 aria-label="Attach files"
                 title="Attach files"
-                className="text-kumo-subtle"
+                className="text-gray-11"
                 onClick={() => fileInputRef.current?.click()}
               />
               <div className="ms-auto flex items-center gap-1">
@@ -1890,8 +1885,8 @@ function ChatThread({
                     aria-label={listening ? "Stop voice input" : "Start voice input"}
                     title={listening ? "Stop voice input" : "Start voice input"}
                     className={cn(
-                      "text-kumo-subtle",
-                      listening && "animate-pulse !text-kumo-danger",
+                      "text-gray-11",
+                      listening && "animate-pulse !text-danger-11",
                     )}
                     onClick={toggleVoice}
                   />
@@ -1918,7 +1913,7 @@ function ChatThread({
               </div>
             </div>
           </form>
-          <p className="h-6 pt-2 text-center text-[11px] text-kumo-subtle">
+          <p className="h-6 pt-2 text-center text-[11px] text-gray-11">
             {threadUsage.inputTokens > 0 ? `${formatUsage(threadUsage)} this thread` : "\u00A0"}
           </p>
         </footer>
@@ -2014,7 +2009,7 @@ function ModelPicker({
         variant="ghost"
         aria-label="Select model"
         aria-expanded={open}
-        className="max-w-40 text-kumo-subtle hover:text-kumo-default"
+        className="max-w-40 text-gray-11 hover:text-gray-12"
         onClick={() => {
           setOpen((prev) => !prev);
           setQuery("");
@@ -2024,15 +2019,15 @@ function ModelPicker({
         <CaretDownIcon className="size-3 shrink-0" />
       </Button>
       {open && (
-        <div className="absolute bottom-full end-0 z-30 mb-2 flex w-[26rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-kumo-base shadow-lg ring ring-kumo-line">
-          <div className="flex items-center gap-2 border-b border-kumo-hairline px-3 py-2">
-            <MagnifyingGlassIcon className="size-4 shrink-0 text-kumo-subtle" />
+        <div className="absolute bottom-full end-0 z-30 mb-2 flex w-[26rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-panel shadow-lg ring ring-gray-a6">
+          <div className="flex items-center gap-2 border-b border-gray-a4 px-3 py-2">
+            <MagnifyingGlassIcon className="size-4 shrink-0 text-gray-11" />
             <input
               autoFocus
               value={query}
               placeholder="Search models..."
               aria-label="Search models"
-              className="w-full bg-transparent text-sm outline-none placeholder:text-kumo-placeholder"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-gray-a9"
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") setOpen(false);
@@ -2043,7 +2038,7 @@ function ModelPicker({
             <div
               role="tablist"
               aria-label="Filter by provider"
-              className="flex max-h-80 w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-e border-kumo-hairline p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex max-h-80 w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-e border-gray-a4 p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <button
                 type="button"
@@ -2052,8 +2047,8 @@ function ModelPicker({
                 aria-label="Favorites"
                 title="Favorites"
                 className={cn(
-                  "flex size-8 shrink-0 items-center justify-center rounded-lg text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default",
-                  providerFilter === "favorites" && "bg-kumo-tint text-kumo-strong",
+                  "flex size-8 shrink-0 items-center justify-center rounded-lg text-gray-11 transition-colors hover:bg-gray-a3 hover:text-gray-12",
+                  providerFilter === "favorites" && "bg-gray-a3 text-gray-12",
                 )}
                 onClick={() =>
                   setProviderFilter((prev) => (prev === "favorites" ? null : "favorites"))
@@ -2070,8 +2065,8 @@ function ModelPicker({
                   aria-label={provider}
                   title={provider}
                   className={cn(
-                    "flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold uppercase text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-default",
-                    providerFilter === provider && "bg-kumo-tint text-kumo-strong",
+                    "flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold uppercase text-gray-11 transition-colors hover:bg-gray-a3 hover:text-gray-12",
+                    providerFilter === provider && "bg-gray-a3 text-gray-12",
                   )}
                   onClick={() =>
                     setProviderFilter((prev) => (prev === provider ? null : provider))
@@ -2087,7 +2082,7 @@ function ModelPicker({
               className="max-h-80 min-w-0 flex-1 overflow-y-auto p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {filtered.length === 0 && (
-                <p className="px-2 py-2 text-xs text-kumo-subtle">
+                <p className="px-2 py-2 text-xs text-gray-11">
                   {models.length === 0
                     ? "Model list unavailable."
                     : providerFilter === "favorites" && favorites.length === 0
@@ -2101,7 +2096,7 @@ function ModelPicker({
                 return (
                   <div
                     key={option.id}
-                    className="group/model relative rounded-lg transition-colors hover:bg-kumo-tint"
+                    className="group/model relative rounded-lg transition-colors hover:bg-gray-a3"
                   >
                     <button
                       type="button"
@@ -2116,11 +2111,11 @@ function ModelPicker({
                       <span className="flex items-center gap-1.5">
                         <span className="truncate text-sm font-medium">{option.name}</span>
                         {tier && (
-                          <span className="shrink-0 text-[11px] text-kumo-subtle">{tier}</span>
+                          <span className="shrink-0 text-[11px] text-gray-11">{tier}</span>
                         )}
                         {option.id === model && <CheckIcon className="size-3.5 shrink-0" />}
                       </span>
-                      <span className="block truncate text-xs text-kumo-subtle">
+                      <span className="block truncate text-xs text-gray-11">
                         {option.description || option.id}
                       </span>
                     </button>
@@ -2132,7 +2127,7 @@ function ModelPicker({
                         "absolute end-2 top-1/2 -translate-y-1/2 rounded p-1 transition-opacity",
                         starred
                           ? "text-yellow-500 hover:text-yellow-500"
-                          : "text-kumo-inactive hover:text-kumo-default",
+                          : "text-gray-8 hover:text-gray-12",
                       )}
                       onClick={() => toggleFavorite(option.id)}
                     >
@@ -2195,7 +2190,7 @@ function ChatMessage({
                 icon={ArrowClockwiseIcon}
                 aria-label="Regenerate reply"
                 title="Regenerate (re-asks with the currently selected model)"
-                className="text-kumo-subtle"
+                className="text-gray-11"
                 onClick={onRegenerate}
               />
             )}
@@ -2207,12 +2202,12 @@ function ChatMessage({
                 icon={GitBranchIcon}
                 aria-label="Fork thread from here"
                 title="Fork thread from here"
-                className="text-kumo-subtle"
+                className="text-gray-11"
                 onClick={() => onFork(message, true)}
               />
             )}
             {usage && (
-              <span className="text-[11px] text-kumo-subtle">{formatUsage(usage)}</span>
+              <span className="text-[11px] text-gray-11">{formatUsage(usage)}</span>
             )}
           </div>
         )}
@@ -2230,7 +2225,7 @@ function ChatMessage({
                   ? "Edit and resend"
                   : "Edit and resend from here (forks into a new thread)"
               }
-              className="text-kumo-subtle"
+              className="text-gray-11"
               onClick={() => {
                 // Editing the last message just refills the composer; editing
                 // an earlier one forks, since sessions are append-only and the
@@ -2246,7 +2241,7 @@ function ChatMessage({
                 shape="square"
                 icon={ArrowClockwiseIcon}
                 aria-label="Retry"
-                className="text-kumo-subtle"
+                className="text-gray-11"
                 onClick={() => onRetry(text)}
               />
             )}
@@ -2289,11 +2284,11 @@ function ChatPart({
       if (part.text.trim().length === 0) return null;
       return (
         <details className="group/reasoning">
-          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 text-xs text-kumo-subtle hover:text-kumo-default [&::-webkit-details-marker]:hidden">
+          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 text-xs text-gray-11 hover:text-gray-12 [&::-webkit-details-marker]:hidden">
             <SparkleIcon className="size-3" aria-hidden />
             Reasoning
           </summary>
-          <p className="mt-2 whitespace-pre-wrap border-s-2 border-kumo-hairline ps-3 text-xs text-kumo-subtle">
+          <p className="mt-2 whitespace-pre-wrap border-s-2 border-gray-a4 ps-3 text-xs text-gray-11">
             {part.text}
           </p>
         </details>
@@ -2354,7 +2349,7 @@ function ChatPart({
               <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
                 {marker}
               </summary>
-              <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
+              <div className="mt-2 flex flex-col gap-2 border-s-2 border-gray-a4 ps-3">
                 <ToolPayload label="Input" value={part.input} />
                 {part.state === "output-available" && (
                   <ToolPayload label="Output" value={part.output} />
@@ -2420,12 +2415,12 @@ function ChatPart({
           <BubbleContent>
             <div className="flex flex-col gap-3">
               <div className="flex items-center gap-2 text-sm font-medium">
-                <KeyIcon className="size-4 text-kumo-subtle" aria-hidden />
+                <KeyIcon className="size-4 text-gray-11" aria-hidden />
                 {part.displayName}
               </div>
-              <p className="text-sm text-kumo-subtle">{part.description}</p>
+              <p className="text-sm text-gray-11">{part.description}</p>
               {part.authorization?.userCode && (
-                <code className="w-fit rounded-md bg-kumo-tint px-2.5 py-1 font-mono text-sm tracking-widest">
+                <code className="w-fit rounded-md bg-gray-a3 px-2.5 py-1 font-mono text-sm tracking-widest">
                   {part.authorization.userCode}
                 </code>
               )}

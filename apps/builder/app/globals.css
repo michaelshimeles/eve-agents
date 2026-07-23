@@ -3,10 +3,6 @@
    color utilities (bg-panel, text-gray-11, border-gray-a4, bg-accent-9, …). */
 @import "frosted-ui/styles.css";
 @import "tailwindcss";
-@import "./typeset.css";
-/* Utility-only import (shimmer, scroll-fade, scrollbar helpers) used by the
-   chat message scroller and attachments. Defines no color tokens. */
-@import "shadcn/tailwind.css";
 
 @theme inline {
   --color-canvas: var(--color-background);
@@ -64,24 +60,4 @@
   --color-success-11: var(--success-11);
   --color-warning-11: var(--warning-11);
   --color-info-11: var(--info-11);
-}
-
-.typeset-docs {
-  --typeset-font-body: var(--default-font-family);
-  --typeset-font-heading: var(--default-font-family);
-  --typeset-font-mono: var(--code-font-family);
-  --typeset-size: 14px;
-  --typeset-leading: 1.75;
-  --typeset-flow: 1.25em;
-}
-
-.frosted-ui {
-  /* Bridge legacy variable names used by typeset.css onto Frosted tokens. */
-  --color-foreground: var(--gray-12);
-  --color-muted-foreground: var(--gray-11);
-  --color-muted: var(--gray-a3);
-  --color-border: var(--gray-a4);
-  --color-primary: var(--accent-9);
-  --color-ring: var(--accent-8);
-  --radius: 0.5rem;
 }
