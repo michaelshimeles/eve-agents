@@ -329,6 +329,125 @@ export interface DeploymentStatus {
   errorLog: string | null;
 }
 
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  /** Millisecond timestamp of the last project update, when Vercel reports one. */
+  updatedAt: number | null;
+}
+
+/** Projects visible to the token in this scope (first page, newest first). */
+export async function listProjects(
+  token: string,
+  teamId: string | null,
+): Promise<ProjectSummary[]> {
+  const body = await api<{
+    projects?: { id: string; name: string; updatedAt?: number }[];
+  }>("/v10/projects?limit=100", { token, teamId, stage: "project" });
+  return (body.projects ?? []).map((project) => ({
+    id: project.id,
+    name: project.name,
+    updatedAt: project.updatedAt ?? null,
+  }));
+}
+
+export interface ProjectDetails {
+  id: string;
+  name: string;
+  /** True when the project is linked to a git repository (builder deploys never are). */
+  hasGitRepository: boolean;
+}
+
+/** Looks up an existing project by name; null when it doesn't exist. */
+export async function getProject(
+  token: string,
+  teamId: string | null,
+  name: string,
+): Promise<ProjectDetails | null> {
+  try {
+    const project = await api<{
+      id: string;
+      name: string;
+      link?: { type?: string; repo?: string; repoId?: number } | null;
+    }>(`/v9/projects/${encodeURIComponent(name)}`, { token, teamId, stage: "project" });
+    return {
+      id: project.id,
+      name: project.name,
+      hasGitRepository: project.link != null && typeof project.link === "object",
+    };
+  } catch (error) {
+    if (error instanceof VercelApiError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+/** The most recent READY production deployment of a project, or null. */
+export async function latestProductionDeploymentId(
+  token: string,
+  teamId: string | null,
+  projectId: string,
+): Promise<string | null> {
+  const body = await api<{ deployments?: { uid: string }[] }>(
+    `/v6/deployments?projectId=${encodeURIComponent(projectId)}&target=production&state=READY&limit=1`,
+    { token, teamId, stage: "project" },
+  );
+  return body.deployments?.[0]?.uid ?? null;
+}
+
+interface DeploymentFileTreeEntry {
+  name: string;
+  type: string;
+  uid?: string;
+  children?: DeploymentFileTreeEntry[];
+}
+
+/**
+ * Source file paths of a deployment mapped to their file ids. Only available
+ * for deployments created with inline files — which is how the builder
+ * deploys — so this doubles as a "was this deployed by the builder?" probe.
+ */
+export async function listDeploymentFiles(
+  token: string,
+  teamId: string | null,
+  deploymentId: string,
+): Promise<Map<string, string>> {
+  const tree = await api<DeploymentFileTreeEntry[]>(`/v6/deployments/${deploymentId}/files`, {
+    token,
+    teamId,
+    stage: "project",
+  });
+  const out = new Map<string, string>();
+  const visit = (entries: DeploymentFileTreeEntry[], prefix: string): void => {
+    for (const entry of entries) {
+      const entryPath = prefix.length > 0 ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.type === "directory" && Array.isArray(entry.children)) {
+        visit(entry.children, entryPath);
+      } else if (entry.type === "file" && typeof entry.uid === "string") {
+        out.set(entryPath, entry.uid);
+      }
+    }
+  };
+  visit(Array.isArray(tree) ? tree : [], "");
+  return out;
+}
+
+/** Contents of one deployment source file (the API returns base64). */
+export async function getDeploymentFile(
+  token: string,
+  teamId: string | null,
+  deploymentId: string,
+  fileId: string,
+): Promise<Buffer> {
+  const body = await api<{ data?: string }>(
+    `/v8/deployments/${deploymentId}/files/${fileId}`,
+    { token, teamId, stage: "project" },
+  );
+  if (typeof body.data !== "string") {
+    throw new VercelApiError("project", "Vercel returned no contents for a deployment file");
+  }
+  return Buffer.from(body.data, "base64");
+}
+
 export async function getDeploymentStatus(
   token: string,
   teamId: string | null,

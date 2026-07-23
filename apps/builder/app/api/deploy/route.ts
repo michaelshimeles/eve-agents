@@ -1,6 +1,6 @@
 import webpush from "web-push";
 
-import { assembleDeployment, templateFiles } from "@/lib/assemble";
+import { assembleDeployment, templateFiles, templateInfo } from "@/lib/assemble";
 import { requiredKeys, validateConfig, type AgentConfig, type DeployTarget } from "@/lib/config";
 import { validCron } from "@/lib/schedule-codegen";
 import {
@@ -33,13 +33,29 @@ interface DeployRequest {
   confirmExisting?: boolean;
 }
 
-function buildEnv(config: AgentConfig): EnvVar[] {
+/** Env stamps that let a deployed agent identify itself for later updates. */
+interface UpdateStamps {
+  templateVersion: string;
+  templateRelease: number;
+  builderUrl: string;
+}
+
+function buildEnv(config: AgentConfig, stamps: UpdateStamps): EnvVar[] {
   const vapid = webpush.generateVAPIDKeys();
   const vars: EnvVar[] = [
     { key: "OWNER_NAME", value: config.ownerName.trim() },
     { key: "EVE_ENABLED_FEATURES", value: config.features.join(",") },
     { key: "NEXT_PUBLIC_VAPID_PUBLIC_KEY", value: vapid.publicKey },
     { key: "VAPID_PRIVATE_KEY", value: vapid.privateKey },
+    // Deep-link + legacy env identity. The manage page prefers the baked
+    // lib/eve-template-stamp.ts for release ordering; env keeps older agents
+    // and the update deep-link working. release (from
+    // apps/eve/.eve-template-release) orders templates so a content
+    // rollback isn't offered as an upgrade.
+    { key: "EVE_TEMPLATE_VERSION", value: stamps.templateVersion },
+    { key: "EVE_TEMPLATE_RELEASE", value: String(stamps.templateRelease) },
+    { key: "EVE_PROJECT_NAME", value: config.projectName },
+    { key: "EVE_BUILDER_URL", value: stamps.builderUrl },
   ];
   // Connected stores inject DATABASE_URL / BLOB_READ_WRITE_TOKEN themselves.
   if (config.postgres.mode === "manual") {
@@ -149,9 +165,16 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
+  const info = await templateInfo();
+  const stamps = {
+    templateVersion: info.version,
+    templateRelease: info.release,
+    builderUrl: new URL(request.url).origin,
+  };
+
   if (body.dryRun === true) {
-    const files = await templateFiles(config);
-    const envKeys = buildEnv(config).map((entry) => entry.key);
+    const files = await templateFiles(config.features);
+    const envKeys = buildEnv(config, stamps).map((entry) => entry.key);
     if (config.postgres.mode === "create") envKeys.push("DATABASE_URL (new Neon database)");
     if (config.postgres.mode === "connect") envKeys.push("DATABASE_URL (from connected database)");
     if (requiredKeys(config.features).blob && config.blob.mode !== "manual") {
@@ -182,7 +205,22 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
     await connectStorage(token, teamId, project.id, project.name, config);
-    await upsertEnv(token, teamId, project.id, buildEnv(config));
+    let env = buildEnv(config, stamps);
+    if (project.existed) {
+      // Redeploying into an existing agent: keep its VAPID key pair so the
+      // browser push subscriptions signed against the old public key survive.
+      const existingKeys = await listProjectEnvKeys(token, teamId, project.id);
+      if (
+        existingKeys.includes("NEXT_PUBLIC_VAPID_PUBLIC_KEY") &&
+        existingKeys.includes("VAPID_PRIVATE_KEY")
+      ) {
+        env = env.filter(
+          (entry) =>
+            entry.key !== "NEXT_PUBLIC_VAPID_PUBLIC_KEY" && entry.key !== "VAPID_PRIVATE_KEY",
+        );
+      }
+    }
+    await upsertEnv(token, teamId, project.id, env);
     const files = await assembleDeployment(config);
     const deployment = await createDeployment(token, teamId, project.name, files);
     return Response.json({

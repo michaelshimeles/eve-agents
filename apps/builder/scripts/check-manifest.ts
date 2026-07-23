@@ -1,6 +1,7 @@
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { TEMPLATE_RELEASE_FILE } from "../lib/assemble";
 import { claimedPrunableFiles, PRUNABLE_DIRS } from "../lib/manifest";
 
 // Guards the "apps/eve is the template" invariant: every file that eve
@@ -46,4 +47,13 @@ if (stale.length > 0) {
 }
 if (unclaimed.length > 0 || stale.length > 0) process.exit(1);
 
-console.log(`manifest ok: ${actual.length} prunable files, all claimed`);
+const releaseRaw = (await readFile(path.join(eveRoot, TEMPLATE_RELEASE_FILE), "utf8").catch(() => "")).trim();
+const release = Number.parseInt(releaseRaw, 10);
+if (!Number.isFinite(release) || release < 1) {
+  console.error(
+    `${TEMPLATE_RELEASE_FILE} must contain a positive integer (got ${JSON.stringify(releaseRaw)}). Bump it when shipping template changes agents should pick up.`,
+  );
+  process.exit(1);
+}
+
+console.log(`manifest ok: ${actual.length} prunable files, all claimed; template release ${release}`);

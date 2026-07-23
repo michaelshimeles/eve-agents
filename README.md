@@ -29,22 +29,24 @@ A personal AI assistant ("Eve") in the spirit of OpenClaw — proactive, always-
 
 **Manage page** — `/manage` shows reminders (with run history), webhooks, memories, connections, and skills in one place.
 
-**Agent builder (`apps/builder`)** — a wizard where anyone can configure their own Eve (name, personality, per-tool capabilities, channels, custom cron jobs, editable generated instructions) and one-click deploy it into **their** Vercel account:
+**Agent builder (`apps/builder`)** — create a configured Eve and deploy it into **your** Vercel account, then update it later when the template changes:
 
-- The template is the live `apps/eve` source — assembled at deploy time with feature pruning, so the personal agent and the product never drift. A manifest completeness check fails CI if a new tool isn't mapped to a feature.
-- Deploys via the Vercel REST API with the user's token: create project → set env vars → deploy inline files → stream build status → health check. Keys pass through in memory and are never stored; VAPID push keys are generated automatically; models bill to the deployer's own AI Gateway (no provider keys).
-- Telegram webhook registration happens automatically after deploy when a bot token is provided.
+- **Create** — wizard for name, personality, capabilities, channels, custom cron jobs, and editable generated instructions; one click deploys into the owner's Vercel account.
+- **Template** — the live `apps/eve` source, assembled at deploy time with feature pruning, so the personal agent and the product never drift. A manifest completeness check fails CI if a new tool isn't mapped to a feature.
+- **Deploy** — Vercel REST API with the user's token: create project → set env vars → deploy inline files → stream build status → health check. Keys pass through in memory and are never stored; VAPID push keys are generated automatically; models bill to the deployer's own AI Gateway (no provider keys). Telegram webhooks register automatically when a bot token is provided.
+- **Update** — each deployment is stamped with a template version (content hash), a monotonic release from `apps/eve/.eve-template-release` (bump that file when shipping changes agents should pick up), and an `eve-builder.json` manifest. When the builder's release is higher, the agent's `/manage` page shows an update banner that deep-links to the builder's *Update an agent* tab. The owner pastes their Vercel token and clicks once: the builder reads features, instructions, and custom schedules back from the deployed files, reassembles them on the latest template, and redeploys into the same project. Env vars, VAPID keys, storage, chat history, memories, skills, and the URL are preserved. Agents that predate the manifest need one Create-tab redeploy into the existing project before Update is available.
 
 ## Structure
 
 ```
 apps/eve/         # the agent app (also the builder's deploy template)
   agent/          # eve agent: channels, tools, skills, schedules, instructions
-  app/            # Next.js web chat UI + API routes (threads, search, automations)
+  app/            # Next.js web chat UI + API routes (threads, search, update-check, …)
   components/     # UI components (Frosted UI design system)
   lib/            # Neon-backed stores (threads, push), Composio connect, web auth
 apps/builder/     # the eveclaw agent builder
-  app/            # wizard UI + deploy API routes (identify, deploy, status, finalize)
+  app/            # create/update UI + API routes (deploy, update, template-version, …)
+  components/     # wizard + update flow
   lib/            # Vercel API client, feature manifest, assembler, generators
   scripts/        # manifest completeness check, manual smoke deploy
 ```
