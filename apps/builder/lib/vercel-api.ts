@@ -323,6 +323,8 @@ export async function createDeployment(
 export interface DeploymentStatus {
   readyState: string;
   url: string;
+  /** Production aliases (public even when deployment URLs sit behind SSO). */
+  aliases: string[];
   /** Present when the build failed: the tail of the build log. */
   errorLog: string | null;
 }
@@ -332,11 +334,14 @@ export async function getDeploymentStatus(
   teamId: string | null,
   deploymentId: string,
 ): Promise<DeploymentStatus> {
-  const deployment = await api<{ readyState?: string; status?: string; url: string }>(
-    `/v13/deployments/${deploymentId}`,
-    { token, teamId, stage: "build" },
-  );
+  const deployment = await api<{
+    readyState?: string;
+    status?: string;
+    url: string;
+    alias?: string[];
+  }>(`/v13/deployments/${deploymentId}`, { token, teamId, stage: "build" });
   const readyState = deployment.readyState ?? deployment.status ?? "QUEUED";
+  const aliases = Array.isArray(deployment.alias) ? deployment.alias : [];
 
   let errorLog: string | null = null;
   if (readyState === "ERROR") {
@@ -354,5 +359,5 @@ export async function getDeploymentStatus(
     }
   }
 
-  return { readyState, url: deployment.url, errorLog };
+  return { readyState, url: deployment.url, aliases, errorLog };
 }

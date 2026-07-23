@@ -138,11 +138,13 @@ type DeployPhase =
   | { kind: "confirm-existing"; message: string }
   | { kind: "creating" }
   | { kind: "building"; deploymentId: string; url: string; inspectorUrl: string | null }
+  | { kind: "finalizing"; url: string }
   | {
       kind: "ready";
       url: string;
       healthy: boolean;
       sessionOk: boolean;
+      sessionError: string | null;
       telegramWebhook: "set" | "failed" | null;
     }
   | { kind: "error"; stage: string; message: string; log: string | null };
@@ -423,6 +425,7 @@ export function BuilderWizard() {
           };
           if (!response.ok) throw new Error(body.error ?? "Status check failed");
           if (body.readyState === "READY") {
+            setPhase({ kind: "finalizing", url: body.url ?? "" });
             const finalize = await fetch("/api/deploy/finalize", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -439,13 +442,18 @@ export function BuilderWizard() {
               .catch(() => null) as {
               healthy?: boolean;
               sessionOk?: boolean;
+              sessionError?: string | null;
               telegramWebhook?: "set" | "failed" | null;
+              publicUrl?: string;
             } | null;
             setPhase({
               kind: "ready",
-              url: body.url ?? "",
+              // Show the shareable production alias, not the SSO-protected
+              // deployment-id URL.
+              url: finalize?.publicUrl ?? body.url ?? "",
               healthy: finalize?.healthy ?? false,
               sessionOk: finalize?.sessionOk ?? false,
+              sessionError: finalize?.sessionError ?? null,
               telegramWebhook: finalize?.telegramWebhook ?? null,
             });
             return;
@@ -1185,6 +1193,10 @@ export function BuilderWizard() {
               <ProgressNote text="Creating the project, env vars, and deployment…" />
             )}
 
+            {phase.kind === "finalizing" && (
+              <ProgressNote text="Build done — warming up the agent and running a first test message. This can take a minute or two on a brand-new project…" />
+            )}
+
             {phase.kind === "building" && (
               <>
                 <ProgressNote text="Vercel is building your agent — usually 2–4 minutes." />
@@ -1216,8 +1228,12 @@ export function BuilderWizard() {
                   </Callout.Title>
                   <Callout.Description>
                     {phase.sessionOk
-                      ? "Health check and a test message both passed."
-                      : "The app is up, but starting a conversation failed. If you recently deleted a project with this same name, Vercel serves stale identity tokens for up to ~2 hours — wait, then redeploy from your Vercel dashboard (or rename the project and redeploy). Otherwise check the runtime logs."}
+                      ? "Health check and a test message both passed — the agent is warmed up and ready."
+                      : phase.sessionError === "protected"
+                        ? "This project has Vercel Deployment Protection enabled, so the chat requires Vercel SSO — it works for you while logged into Vercel, but not for anyone else. To share it publicly, disable Deployment Protection in the project's settings."
+                        : /channel handler/i.test(phase.sessionError ?? "")
+                          ? "Starting a conversation failed. If you recently deleted a project with this same name, Vercel serves stale identity tokens for up to ~2 hours — wait, then redeploy from your Vercel dashboard (or rename the project and redeploy). Otherwise check the runtime logs."
+                          : `The app is up, but the agent hasn't answered a test message yet${phase.sessionError !== null && phase.sessionError !== "timeout" ? ` (${phase.sessionError})` : ""}. A brand-new deployment can need a couple of minutes to warm up — open the chat and try saying hi; if it keeps failing, check the runtime logs in your Vercel dashboard.`}
                   </Callout.Description>
                 </Callout.Root>
                 <a
@@ -1229,7 +1245,10 @@ export function BuilderWizard() {
                   {phase.url}
                 </a>
                 <ul className="flex flex-col gap-1.5 text-sm text-gray-11">
-                  <li>• Open the chat and say hi — the first reply may take a few seconds.</li>
+                  <li>
+                    • Open the chat and say hi — replies are quick once warm, though the very
+                    first minutes of a new deployment can be slower.
+                  </li>
                   <li>• Enable notifications (bell icon) for proactive reminders.</li>
                   {features.has("integrations") && <li>• Connect apps under Manage → Connections.</li>}
                   {telegramEnabled && (
