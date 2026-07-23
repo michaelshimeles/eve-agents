@@ -9,6 +9,7 @@ import {
   createDeployment,
   createProject,
   listProjectEnvKeys,
+  provisionNeonDatabase,
   upsertEnv,
   VercelApiError,
   type EnvVar,
@@ -76,7 +77,10 @@ async function connectStorage(
 ): Promise<void> {
   const wantBlob = requiredKeys(config.features).blob;
 
-  if (config.postgres.mode === "connect") {
+  if (config.postgres.mode === "create") {
+    const storeId = await provisionNeonDatabase(token, teamId, `${projectName}-db`);
+    await connectStoreToProject(token, teamId, storeId, projectId);
+  } else if (config.postgres.mode === "connect") {
     await connectStoreToProject(token, teamId, config.postgres.storeId, projectId);
   }
   if (wantBlob && config.blob.mode !== "manual") {
@@ -88,7 +92,7 @@ async function connectStorage(
   }
 
   const expected: string[] = [];
-  if (config.postgres.mode === "connect") expected.push("DATABASE_URL");
+  if (config.postgres.mode !== "manual") expected.push("DATABASE_URL");
   if (wantBlob && config.blob.mode !== "manual") expected.push("BLOB_READ_WRITE_TOKEN");
   if (expected.length === 0) return;
 
@@ -126,6 +130,7 @@ export async function POST(request: Request): Promise<Response> {
   if (body.dryRun === true) {
     const files = await templateFiles(config);
     const envKeys = buildEnv(config).map((entry) => entry.key);
+    if (config.postgres.mode === "create") envKeys.push("DATABASE_URL (new Neon database)");
     if (config.postgres.mode === "connect") envKeys.push("DATABASE_URL (from connected database)");
     if (requiredKeys(config.features).blob && config.blob.mode !== "manual") {
       envKeys.push("BLOB_READ_WRITE_TOKEN (from Blob store)");

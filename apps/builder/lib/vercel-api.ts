@@ -158,6 +158,69 @@ export async function createBlobStore(
   return body.store.id;
 }
 
+/**
+ * Provisions a fresh Neon Postgres database through the Vercel Marketplace
+ * auto-provision API (server-default billing plan, i.e. the free tier) and
+ * returns the new resource's store id. Works headlessly when the account
+ * already has the Neon integration installed; otherwise Vercel requires a
+ * one-time terms acceptance in the browser, which we surface as an error
+ * with the fallback options.
+ */
+export async function provisionNeonDatabase(
+  token: string,
+  teamId: string | null,
+  name: string,
+): Promise<string> {
+  const integration = await api<{
+    id: string;
+    slug: string;
+    products?: { id: string; slug: string }[];
+  }>("/v2/integrations/integration/neon", { token, teamId, stage: "storage" });
+  const product = integration.products?.[0];
+  if (product === undefined) {
+    throw new VercelApiError("storage", "The Neon integration exposes no products");
+  }
+
+  const installations = await api<{ id: string }[]>(
+    `/v2/integrations/configurations?view=account&installationType=marketplace&integrationIdOrSlug=${integration.id}`,
+    { token, teamId, stage: "storage" },
+  );
+  if (!Array.isArray(installations) || installations.length === 0) {
+    throw new VercelApiError(
+      "storage",
+      "Your Vercel account hasn't installed the Neon integration yet. Install it once (vercel.com → Storage → Create Database → Neon), then retry — or pick an existing database / paste a connection string.",
+    );
+  }
+
+  const result = await api<{
+    kind?: string;
+    reason?: string;
+    resource?: { id: string };
+  }>(
+    `/v1/integrations/integration/${integration.slug}/marketplace/auto-provision/${product.slug}`,
+    {
+      token,
+      teamId,
+      method: "POST",
+      body: {
+        name,
+        metadata: {},
+        acceptedPolicies: {},
+        source: "cli",
+        ...(installations.length === 1 ? { installationId: installations[0].id } : {}),
+      },
+      stage: "storage",
+    },
+  );
+  if (result.kind !== "provisioned" || result.resource === undefined) {
+    throw new VercelApiError(
+      "storage",
+      `Vercel couldn't create the database automatically (${result.reason ?? result.kind ?? "unknown"}). Pick an existing database or paste a connection string instead.`,
+    );
+  }
+  return result.resource.id;
+}
+
 /** Connects a store to a project; Vercel injects the store's env vars. */
 export async function connectStoreToProject(
   token: string,

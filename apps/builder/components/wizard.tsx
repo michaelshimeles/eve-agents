@@ -137,7 +137,13 @@ type DeployPhase =
   | { kind: "idle" }
   | { kind: "creating" }
   | { kind: "building"; deploymentId: string; url: string; inspectorUrl: string | null }
-  | { kind: "ready"; url: string; healthy: boolean; telegramWebhook: "set" | "failed" | null }
+  | {
+      kind: "ready";
+      url: string;
+      healthy: boolean;
+      sessionOk: boolean;
+      telegramWebhook: "set" | "failed" | null;
+    }
   | { kind: "error"; stage: string; message: string; log: string | null };
 
 export function BuilderWizard() {
@@ -199,9 +205,11 @@ export function BuilderWizard() {
   const keyNeeds = requiredKeys([...features]);
 
   const postgres: PostgresSource =
-    postgresChoice === "manual" || postgresChoice === ""
-      ? { mode: "manual", url: databaseUrl }
-      : { mode: "connect", storeId: postgresChoice };
+    postgresChoice === "create"
+      ? { mode: "create" }
+      : postgresChoice === "manual" || postgresChoice === ""
+        ? { mode: "manual", url: databaseUrl }
+        : { mode: "connect", storeId: postgresChoice };
   const blob: BlobSource =
     blobChoice === "create"
       ? { mode: "create" }
@@ -269,10 +277,8 @@ export function BuilderWizard() {
         const body = (await response.json()) as AccountStores & { error?: string };
         if (!response.ok) throw new Error(body.error ?? "Could not list storage");
         setStores(body);
-        // Default to connecting the first existing database; manual otherwise.
-        setPostgresChoice((current) =>
-          current !== "" ? current : body.databases.length > 0 ? body.databases[0].id : "manual",
-        );
+        // Default to provisioning a fresh database on their account.
+        setPostgresChoice((current) => (current !== "" ? current : "create"));
       })
       .catch((error: unknown) => {
         setStores({ databases: [], blobStores: [] });
@@ -414,11 +420,16 @@ export function BuilderWizard() {
               }),
             })
               .then((res) => (res.ok ? res.json() : null))
-              .catch(() => null) as { healthy?: boolean; telegramWebhook?: "set" | "failed" | null } | null;
+              .catch(() => null) as {
+              healthy?: boolean;
+              sessionOk?: boolean;
+              telegramWebhook?: "set" | "failed" | null;
+            } | null;
             setPhase({
               kind: "ready",
               url: body.url ?? "",
               healthy: finalize?.healthy ?? false,
+              sessionOk: finalize?.sessionOk ?? false,
               telegramWebhook: finalize?.telegramWebhook ?? null,
             });
             return;
@@ -502,10 +513,11 @@ export function BuilderWizard() {
     stores === null
       ? {}
       : {
+          create: "Create a new Neon database (recommended)",
           ...Object.fromEntries(
             stores.databases.map((store) => [
               store.id,
-              `${store.productName !== null ? `${store.productName} — ` : ""}${store.name}`,
+              `Existing — ${store.productName !== null ? `${store.productName} — ` : ""}${store.name}`,
             ]),
           ),
           manual: "Paste a connection string…",
@@ -947,9 +959,11 @@ export function BuilderWizard() {
                 <FormField
                   label="Database"
                   description={
-                    postgresChoice === "manual"
-                      ? "Threads, reminders, and receipts. A free neon.tech database works — tables create themselves."
-                      : "Connected to the new project during deploy; Vercel injects DATABASE_URL. Heads up: sharing a database with another agent shares its threads."
+                    postgresChoice === "create"
+                      ? "A fresh Neon Postgres database is provisioned on your account (free plan) and connected — DATABASE_URL is injected automatically."
+                      : postgresChoice === "manual"
+                        ? "Threads, reminders, and receipts. A free neon.tech database works — tables create themselves."
+                        : "Connected to the new project during deploy; Vercel injects DATABASE_URL. Heads up: sharing a database with another agent shares its threads."
                   }
                 >
                   <Select.Root
@@ -1148,15 +1162,17 @@ export function BuilderWizard() {
 
             {phase.kind === "ready" && (
               <div className="flex flex-col gap-4">
-                <Callout.Root color="green">
+                <Callout.Root color={phase.sessionOk ? "green" : "yellow"}>
                   <Callout.Icon>
-                    <CircleCheck className="size-4" />
+                    {phase.sessionOk ? <CircleCheck className="size-4" /> : <Info className="size-4" />}
                   </Callout.Icon>
-                  <Callout.Title>Your agent is live</Callout.Title>
+                  <Callout.Title>
+                    {phase.sessionOk ? "Your agent is live" : "Deployed, but the agent isn't answering yet"}
+                  </Callout.Title>
                   <Callout.Description>
-                    {phase.healthy
-                      ? "Health check passed."
-                      : "Deployed — the agent service may take another moment to warm up."}
+                    {phase.sessionOk
+                      ? "Health check and a test message both passed."
+                      : "The app is up, but starting a conversation failed. If you recently deleted a project with this same name, Vercel serves stale identity tokens for up to ~2 hours — wait, then redeploy from your Vercel dashboard (or rename the project and redeploy). Otherwise check the runtime logs."}
                   </Callout.Description>
                 </Callout.Root>
                 <a

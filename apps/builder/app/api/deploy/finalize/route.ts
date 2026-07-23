@@ -1,6 +1,7 @@
 // Runs once after the deployment reaches READY: smoke-check the agent's
-// health route and, when Telegram is configured, point the bot's webhook at
-// the new deployment.
+// health route, start a real (tiny) session to prove the workflow runtime
+// works end to end, and, when Telegram is configured, point the bot's
+// webhook at the new deployment.
 
 interface FinalizeRequest {
   deploymentUrl?: unknown;
@@ -20,6 +21,23 @@ export async function POST(request: Request): Promise<Response> {
     healthy = health.ok;
   } catch {
     healthy = false;
+  }
+
+  // A real message-send exercises the workflow runtime (the part that fails
+  // when Vercel serves stale identity tokens after a same-name project was
+  // deleted and recreated). The turn runs invisibly; no chat thread is made.
+  let sessionOk = false;
+  try {
+    const session = await fetch(`${base}/eve/v1/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Reply with the single word: ok" }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const payload = (await session.json().catch(() => null)) as { ok?: boolean } | null;
+    sessionOk = session.ok && payload?.ok === true;
+  } catch {
+    sessionOk = false;
   }
 
   let telegramWebhook: "set" | "failed" | null = null;
@@ -46,5 +64,5 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  return Response.json({ healthy, telegramWebhook });
+  return Response.json({ healthy, sessionOk, telegramWebhook });
 }

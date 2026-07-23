@@ -23,9 +23,13 @@ export interface CustomSchedule {
   prompt: string;
 }
 
-/** Where the database comes from: an existing Vercel-connected store (Vercel
- * injects DATABASE_URL on connect) or a pasted connection string. */
-export type PostgresSource = { mode: "connect"; storeId: string } | { mode: "manual"; url: string };
+/** Where the database comes from: a fresh Neon database provisioned on the
+ * user's account (free plan), an existing Vercel-connected store (Vercel
+ * injects DATABASE_URL on connect), or a pasted connection string. */
+export type PostgresSource =
+  | { mode: "create" }
+  | { mode: "connect"; storeId: string }
+  | { mode: "manual"; url: string };
 
 /** Where Blob storage comes from: a new store created during deploy, an
  * existing store, or a pasted token. Only consulted when a feature needs it. */
