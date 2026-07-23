@@ -7,13 +7,13 @@ import { templateInfo } from "@/lib/assemble";
 
 export async function GET(): Promise<Response> {
   const info = await templateInfo();
+  // No CORS headers: only agents' server-side /api/update-check calls this
+  // (same-origin browser → agent → builder). Version/release aren't secrets,
+  // but wildcard CORS isn't needed for that hop.
   return Response.json(
     { version: info.version, release: info.release },
     {
       headers: {
-        // Deployed agents fetch this cross-origin from their own server and
-        // occasionally from the browser; the version is not a secret.
-        "Access-Control-Allow-Origin": "*",
         "Cache-Control": "public, max-age=300, s-maxage=300",
       },
     },

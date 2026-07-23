@@ -58,27 +58,40 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
   const [phase, setPhase] = useState<UpdatePhase>({ kind: "idle" });
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefillConsumed = useRef(false);
-  /** Stamps from the live agent at update start — used if the build fails. */
-  const priorStamps = useRef<{ version: string | null; release: number | null } | null>(null);
+  /** Stamps + scope from update start — restored if the build fails or polling stops. */
+  const pendingRollback = useRef<{
+    token: string;
+    teamId: string | null;
+    projectName: string;
+    version: string | null;
+    release: number | null;
+  } | null>(null);
 
-  async function rollbackStampsAfterFailedBuild(): Promise<string | null> {
-    const prior = priorStamps.current;
-    if (prior === null || selected.length === 0) return null;
+  async function rollbackStampsAfterFailedBuild(opts?: {
+    keepalive?: boolean;
+  }): Promise<string | null> {
+    const pending = pendingRollback.current;
+    if (pending === null) return null;
+    // Clear first so pagehide / double-calls don't fire twice.
+    pendingRollback.current = null;
     try {
       const response = await fetch("/api/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          token: token.trim(),
-          teamId,
+          token: pending.token,
+          teamId: pending.teamId,
           action: "rollback-stamps",
-          projectName: selected,
-          previousVersion: prior.version,
-          previousRelease: prior.release,
+          projectName: pending.projectName,
+          previousVersion: pending.version,
+          previousRelease: pending.release,
         }),
+        keepalive: opts?.keepalive === true,
       });
       const body = (await response.json()) as { error?: string };
       if (!response.ok) {
+        // Put it back so the user can retry from the error UI if needed.
+        pendingRollback.current = pending;
         return (
           body.error ??
           "Could not restore the previous template stamps. The agent may stop offering this update until you retry."
@@ -86,6 +99,7 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
       }
       return null;
     } catch (error) {
+      pendingRollback.current = pending;
       return error instanceof Error
         ? error.message
         : "Could not restore the previous template stamps after the failed build.";
@@ -93,7 +107,16 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
   }
 
   useEffect(() => {
+    function onLeave() {
+      // Best-effort: if the tab closes mid-build, restore stamps so a later
+      // ERROR doesn't leave the project advertising a release that never shipped.
+      if (pendingRollback.current !== null) {
+        void rollbackStampsAfterFailedBuild({ keepalive: true });
+      }
+    }
+    window.addEventListener("pagehide", onLeave);
     return () => {
+      window.removeEventListener("pagehide", onLeave);
       if (pollTimer.current !== null) clearTimeout(pollTimer.current);
     };
   }, []);
@@ -203,7 +226,7 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
           };
           if (!response.ok) throw new Error(body.error ?? "Status check failed");
           if (body.readyState === "READY") {
-            priorStamps.current = null;
+            pendingRollback.current = null;
             setPhase({ kind: "finalizing" });
             const finalize = (await fetch("/api/deploy/finalize", {
               method: "POST",
@@ -244,14 +267,17 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
           // Cap retries so a revoked token / deleted deployment / network
           // outage surfaces an error instead of polling forever.
           if (consecutiveFailures >= 5) {
-            // Don't roll stamps back here — the build may still succeed; only
-            // ERROR/CANCELED means the new stamps must be reverted.
+            const lost =
+              error instanceof Error
+                ? error.message
+                : "Lost contact with Vercel while waiting for the build.";
+            const rollbackError = await rollbackStampsAfterFailedBuild();
             setPhase({
               kind: "error",
               message:
-                error instanceof Error
-                  ? error.message
-                  : "Lost contact with Vercel while waiting for the build.",
+                rollbackError === null
+                  ? `${lost} Previous template stamps were restored in case the build does not finish.`
+                  : `${lost} Also failed to restore template stamps: ${rollbackError}`,
               log: null,
             });
             return;
@@ -265,7 +291,7 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
   async function runUpdate() {
     if (selected.length === 0) return;
     setPhase({ kind: "starting" });
-    priorStamps.current = null;
+    pendingRollback.current = null;
     try {
       const response = await fetch("/api/update", {
         method: "POST",
@@ -288,7 +314,10 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
         setPhase({ kind: "error", message: body.error ?? "Update failed", log: null });
         return;
       }
-      priorStamps.current = {
+      pendingRollback.current = {
+        token: token.trim(),
+        teamId,
+        projectName: selected,
         version: body.fromVersion ?? null,
         release: typeof body.fromRelease === "number" ? body.fromRelease : null,
       };
