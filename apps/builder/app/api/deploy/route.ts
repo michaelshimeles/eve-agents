@@ -27,6 +27,10 @@ interface DeployRequest {
   target?: DeployTarget;
   config?: AgentConfig;
   dryRun?: boolean;
+  /** Required to deploy into a project that already exists (replaces its
+   * env vars and production deployment); without it we return 409 so the
+   * wizard can ask the user first. */
+  confirmExisting?: boolean;
 }
 
 function buildEnv(config: AgentConfig): EnvVar[] {
@@ -148,6 +152,17 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const project = await createProject(token, teamId, config.projectName);
+    // Nothing has been mutated yet on the existing-project path (createProject
+    // only reads it), so this is a safe place to stop and ask.
+    if (project.existed && body.confirmExisting !== true) {
+      return Response.json(
+        {
+          error: `A project named "${project.name}" already exists on this Vercel account. Deploying into it will replace its environment variables and production deployment.`,
+          code: "project_exists",
+        },
+        { status: 409 },
+      );
+    }
     await connectStorage(token, teamId, project.id, project.name, config);
     await upsertEnv(token, teamId, project.id, buildEnv(config));
     const files = await assembleDeployment(config);

@@ -135,6 +135,7 @@ interface AccountStores {
 
 type DeployPhase =
   | { kind: "idle" }
+  | { kind: "confirm-existing"; message: string }
   | { kind: "creating" }
   | { kind: "building"; deploymentId: string; url: string; inspectorUrl: string | null }
   | {
@@ -413,7 +414,9 @@ export function BuilderWizard() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                deploymentUrl: body.url,
+                token: token.trim(),
+                teamId,
+                deploymentId,
                 telegram: telegramEnabled
                   ? { botToken: telegramBotToken.trim(), webhookSecret: webhookSecretRef.current }
                   : null,
@@ -453,13 +456,13 @@ export function BuilderWizard() {
     }, 3500);
   }
 
-  async function deploy() {
+  async function deploy(confirmExisting = false) {
     setPhase({ kind: "creating" });
     try {
       const response = await fetch("/api/deploy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: { token: token.trim(), teamId }, config }),
+        body: JSON.stringify({ target: { token: token.trim(), teamId }, config, confirmExisting }),
       });
       const body = (await response.json()) as {
         deploymentId?: string;
@@ -467,7 +470,12 @@ export function BuilderWizard() {
         inspectorUrl?: string | null;
         error?: string;
         stage?: string;
+        code?: string;
       };
+      if (body.code === "project_exists") {
+        setPhase({ kind: "confirm-existing", message: body.error ?? "Project already exists." });
+        return;
+      }
       if (!response.ok || body.deploymentId === undefined) {
         setPhase({
           kind: "error",
@@ -1134,6 +1142,30 @@ export function BuilderWizard() {
                   </Button>
                 </div>
               </>
+            )}
+
+            {phase.kind === "confirm-existing" && (
+              <div className="flex flex-col gap-4">
+                <Callout.Root color="yellow">
+                  <Callout.Icon>
+                    <Info className="size-4" />
+                  </Callout.Icon>
+                  <Callout.Title>Project already exists</Callout.Title>
+                  <Callout.Description>{phase.message}</Callout.Description>
+                </Callout.Root>
+                <div className="flex items-center gap-3">
+                  <Button variant="classic" color="yellow" size="3" onClick={() => void deploy(true)}>
+                    Deploy into the existing project
+                  </Button>
+                  <Button variant="surface" size="3" onClick={() => setPhase({ kind: "idle" })}>
+                    Cancel
+                  </Button>
+                </div>
+                <Text render={<p />} size="1" color="gray">
+                  To keep the existing project untouched, go back to Identity and pick a
+                  different project name.
+                </Text>
+              </div>
             )}
 
             {phase.kind === "creating" && (

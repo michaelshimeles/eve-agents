@@ -1,19 +1,47 @@
+import { getDeploymentStatus, VercelApiError } from "@/lib/vercel-api";
+
 // Runs once after the deployment reaches READY: smoke-check the agent's
 // health route, start a real (tiny) session to prove the workflow runtime
 // works end to end, and, when Telegram is configured, point the bot's
 // webhook at the new deployment.
+//
+// The target host is never taken from the request: the caller sends their
+// Vercel token + deployment id, and we resolve the hostname through the
+// Vercel API. That binds all server-side requests to a deployment the
+// caller's own token can access (no SSRF surface).
 
 interface FinalizeRequest {
-  deploymentUrl?: unknown;
+  token?: unknown;
+  teamId?: unknown;
+  deploymentId?: unknown;
   telegram?: { botToken?: unknown; webhookSecret?: unknown } | null;
 }
 
 export async function POST(request: Request): Promise<Response> {
   const body = (await request.json().catch(() => null)) as FinalizeRequest | null;
-  if (body === null || typeof body.deploymentUrl !== "string" || body.deploymentUrl.length === 0) {
-    return Response.json({ error: "Missing deploymentUrl" }, { status: 400 });
+  if (
+    body === null ||
+    typeof body.token !== "string" ||
+    body.token.length === 0 ||
+    typeof body.deploymentId !== "string" ||
+    body.deploymentId.length === 0
+  ) {
+    return Response.json({ error: "Missing token or deploymentId" }, { status: 400 });
   }
-  const base = `https://${body.deploymentUrl.replace(/^https?:\/\//, "")}`;
+  const teamId = typeof body.teamId === "string" && body.teamId.length > 0 ? body.teamId : null;
+
+  let deploymentUrl: string;
+  try {
+    const deployment = await getDeploymentStatus(body.token, teamId, body.deploymentId);
+    if (deployment.readyState !== "READY" || deployment.url.length === 0) {
+      return Response.json({ error: "Deployment is not ready" }, { status: 409 });
+    }
+    deploymentUrl = deployment.url;
+  } catch (error) {
+    const message = error instanceof VercelApiError ? error.message : "Could not verify deployment";
+    return Response.json({ error: message }, { status: 502 });
+  }
+  const base = `https://${deploymentUrl}`;
 
   let healthy = false;
   try {
