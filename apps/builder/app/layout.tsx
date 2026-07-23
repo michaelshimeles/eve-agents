@@ -1,16 +1,12 @@
 import { Theme } from "frosted-ui";
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Eve",
-  description: "Chat with your personal Eve agent",
-};
-
-export const viewport: Viewport = {
-  themeColor: "#111111",
+  title: "eveclaw — Eve Agent Builder",
+  description: "Configure your own Eve agent and deploy it to your Vercel account in one click.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

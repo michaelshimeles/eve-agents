@@ -1,6 +1,6 @@
 # eveclaw
 
-A personal AI assistant ("Eve") in the spirit of OpenClaw — proactive, always-on, and reachable from the web or Telegram. Built on the durable [eve framework](https://eve.dev) with a Next.js chat UI styled with Cloudflare's Kumo design system. Turborepo monorepo with the app in `apps/eve`.
+A personal AI assistant ("Eve") in the spirit of OpenClaw — proactive, always-on, and reachable from the web or Telegram — plus a **builder** that deploys configured copies of her into anyone's Vercel account in one click. Built on the durable [eve framework](https://eve.dev) with a Next.js chat UI styled with Whop's [Frosted UI](https://github.com/whopio/frosted-ui) design system. Turborepo monorepo: the agent app lives in `apps/eve`, the agent builder in `apps/builder`.
 
 ## What it does
 
@@ -29,14 +29,24 @@ A personal AI assistant ("Eve") in the spirit of OpenClaw — proactive, always-
 
 **Manage page** — `/manage` shows reminders (with run history), webhooks, memories, connections, and skills in one place.
 
+**Agent builder (`apps/builder`)** — a wizard where anyone can configure their own Eve (name, personality, per-tool capabilities, channels, custom cron jobs, editable generated instructions) and one-click deploy it into **their** Vercel account:
+
+- The template is the live `apps/eve` source — assembled at deploy time with feature pruning, so the personal agent and the product never drift. A manifest completeness check fails CI if a new tool isn't mapped to a feature.
+- Deploys via the Vercel REST API with the user's token: create project → set env vars → deploy inline files → stream build status → health check. Keys pass through in memory and are never stored; VAPID push keys are generated automatically; models bill to the deployer's own AI Gateway (no provider keys).
+- Telegram webhook registration happens automatically after deploy when a bot token is provided.
+
 ## Structure
 
 ```
-apps/eve/
-  agent/        # eve agent: channels, tools, skills, schedules, instructions
-  app/          # Next.js web chat UI + API routes (threads, search, automations)
-  components/   # UI components (Kumo design system)
-  lib/          # Neon-backed stores (threads, push), Composio connect, web auth
+apps/eve/         # the agent app (also the builder's deploy template)
+  agent/          # eve agent: channels, tools, skills, schedules, instructions
+  app/            # Next.js web chat UI + API routes (threads, search, automations)
+  components/     # UI components (Frosted UI design system)
+  lib/            # Neon-backed stores (threads, push), Composio connect, web auth
+apps/builder/     # the eveclaw agent builder
+  app/            # wizard UI + deploy API routes (identify, deploy, status, finalize)
+  lib/            # Vercel API client, feature manifest, assembler, generators
+  scripts/        # manifest completeness check, manual smoke deploy
 ```
 
 The Next.js app mounts the agent on the same origin via `withEve` — `/eve/v1/**` routes to the agent service. One dev server, one Vercel deployment.
@@ -68,9 +78,10 @@ See [`apps/eve/.env.example`](apps/eve/.env.example) for the full annotated list
 
 ## Scripts
 
-- `npm run dev` — dev server (web + agent)
+- `npm run dev` — dev servers (agent app on :3000, builder on :3100)
 - `npm run build` — production build
-- `npm run typecheck` — TypeScript checks
+- `npm run typecheck` — TypeScript checks + builder manifest completeness
+- `VERCEL_TOKEN=… DATABASE_URL=… npx tsx apps/builder/scripts/smoke-deploy.ts` — manual end-to-end deploy test (creates and deletes a real project)
 
 ## Deploy
 

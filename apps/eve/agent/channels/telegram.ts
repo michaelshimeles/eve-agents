@@ -14,7 +14,7 @@ function allowedUserIds(): string[] {
 }
 
 export default telegramChannel({
-  botUsername: "eve_tele_bot",
+  botUsername: process.env.TELEGRAM_BOT_USERNAME ?? "eve_tele_bot",
   async onMessage(ctx, message) {
     if (message.chat.type !== "private") return null;
     if (message.from?.isBot === true) return null;

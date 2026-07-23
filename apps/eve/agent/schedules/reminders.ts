@@ -1,6 +1,7 @@
 import { defineSchedule } from "eve/schedules";
 
 import telegram from "../channels/telegram";
+import { ownerName } from "../lib/owner";
 import { recordAutomationRun } from "../lib/runs-db";
 import { deliverToWebChatThread } from "../lib/web-thread-delivery";
 import { claimDueReminders, completeReminder, releaseReminder, type ReminderRow } from "../lib/reminders-db";
@@ -21,7 +22,7 @@ function reminderMessage(reminder: ReminderRow): string {
     "",
     reminder.prompt,
     "",
-    "Carry it out now and send Micky the result. He didn't just message you - this is proactive, so lead with what this is about.",
+    `Carry it out now and send ${ownerName()} the result. They didn't just message you - this is proactive, so lead with what this is about.`,
   ].join("\n");
 }
 

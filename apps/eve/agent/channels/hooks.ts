@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { defineChannel, POST } from "eve/channels";
 
+import { ownerName } from "../lib/owner";
 import { recordAutomationRun } from "../lib/runs-db";
 import { deliverToWebChatThread } from "../lib/web-thread-delivery";
 import { getWebhook, recordWebhookFire, type WebhookRow } from "../lib/webhooks-db";
@@ -43,7 +44,7 @@ function hookMessage(hook: WebhookRow, contentType: string | null, payload: stri
     payload,
     "```",
     "",
-    "Carry out the instruction now and send Micky the result. He didn't just message you - this fired on its own, so lead with what this is about.",
+    `Carry out the instruction now and send ${ownerName()} the result. They didn't just message you - this fired on its own, so lead with what this is about.`,
   ].join("\n");
 }
 

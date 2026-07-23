@@ -1,6 +1,7 @@
 "use client";
 
-import { Badge, Button, DropdownMenu, Input, InputArea, Loader, Tabs } from "@cloudflare/kumo";
+import { Badge, DropdownMenu, Tabs, TextArea, TextField } from "frosted-ui";
+import { Button, Loader } from "@/components/ui/compat";
 import {
   ArrowSquareOutIcon,
   CaretDownIcon,
@@ -145,7 +146,7 @@ function CopyUrlButton({ url }: { url: string }) {
 }
 
 function EmptyNote({ children }: { children: React.ReactNode }) {
-  return <p className="py-8 text-center text-sm text-kumo-subtle">{children}</p>;
+  return <p className="py-8 text-center text-sm text-gray-11">{children}</p>;
 }
 
 function LoadingRow() {
@@ -165,7 +166,7 @@ function RunHistory({
   onOpenThread: (threadId: string) => void;
 }) {
   if (runs.length === 0) {
-    return <p className="pb-2 ps-6 text-xs text-kumo-subtle">No runs recorded yet.</p>;
+    return <p className="pb-2 ps-6 text-xs text-gray-11">No runs recorded yet.</p>;
   }
   return (
     <ul className="mb-2 flex flex-col gap-1 ps-6">
@@ -174,20 +175,20 @@ function RunHistory({
           <span
             className={cn(
               "size-1.5 shrink-0 rounded-full",
-              run.status === "ok" ? "bg-kumo-success" : "bg-kumo-danger",
+              run.status === "ok" ? "bg-success-11" : "bg-danger-9",
             )}
             aria-hidden
           />
-          <span className="text-kumo-subtle">{formatWhen(run.firedAt)}</span>
+          <span className="text-gray-11">{formatWhen(run.firedAt)}</span>
           {run.status === "error" && (
-            <span className="truncate text-kumo-danger" title={run.error ?? undefined}>
+            <span className="truncate text-danger-11" title={run.error ?? undefined}>
               {run.error ?? "failed"}
             </span>
           )}
           {run.threadId !== null && (
             <button
               type="button"
-              className="flex items-center gap-1 text-kumo-interact hover:underline"
+              className="flex items-center gap-1 text-accent-11 hover:underline"
               onClick={() => onOpenThread(run.threadId!)}
             >
               Open thread
@@ -225,7 +226,7 @@ function ExpandCaret({ expanded, onToggle, label }: { expanded: boolean; onToggl
 function ToolkitLogo({ toolkit }: { toolkit: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
-    return <PlugsIcon className="size-4 shrink-0 text-kumo-subtle" aria-hidden />;
+    return <PlugsIcon className="size-4 shrink-0 text-gray-11" aria-hidden />;
   }
   return (
     <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white p-[3px]">
@@ -321,7 +322,7 @@ function ConnectionsTab() {
             .map((entry) => (
               <li
                 key={entry.toolkit}
-                className="border-b border-kumo-hairline py-2.5 last:border-b-0"
+                className="border-b border-gray-a4 py-2.5 last:border-b-0"
               >
                 <div className="flex items-center gap-2">
                   <ToolkitLogo toolkit={entry.toolkit} />
@@ -330,10 +331,10 @@ function ConnectionsTab() {
                 <ul className="mt-1 flex flex-col gap-1">
                   {entry.accounts.map((account) => (
                     <li key={account.id} className="flex items-center gap-2 ps-6">
-                      <span className="min-w-0 flex-1 truncate text-xs text-kumo-subtle">
+                      <span className="min-w-0 flex-1 truncate text-xs text-gray-11">
                         {account.alias ?? account.label ?? account.id}
                       </span>
-                      <Badge variant={account.status === "active" ? "success" : "secondary"}>
+                      <Badge variant="soft" color={account.status === "active" ? "green" : "gray"}>
                         {account.status}
                       </Badge>
                       <DeleteButton
@@ -349,16 +350,14 @@ function ConnectionsTab() {
       )}
       {!failed && available.length > 0 && (
         <div className="pt-1">
-          <DropdownMenu>
-            <DropdownMenu.Trigger
-              render={
-                <Button variant="secondary" size="sm" disabled={pendingToolkit !== null}>
-                  <PlusIcon className="size-3.5" aria-hidden />
-                  {pendingToolkit !== null ? "Opening…" : "Connect an app"}
-                  <CaretDownIcon className="size-3 text-kumo-subtle" aria-hidden />
-                </Button>
-              }
-            />
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <Button variant="secondary" size="sm" disabled={pendingToolkit !== null}>
+                <PlusIcon className="size-3.5" aria-hidden />
+                {pendingToolkit !== null ? "Opening…" : "Connect an app"}
+                <CaretDownIcon className="size-3 text-gray-11" aria-hidden />
+              </Button>
+            </DropdownMenu.Trigger>
             <DropdownMenu.Content align="start">
               {available.map((toolkit) => (
                 <DropdownMenu.Item key={toolkit} onClick={() => connect(toolkit)}>
@@ -369,11 +368,11 @@ function ConnectionsTab() {
                 </DropdownMenu.Item>
               ))}
             </DropdownMenu.Content>
-          </DropdownMenu>
+          </DropdownMenu.Root>
         </div>
       )}
       {!failed && (
-        <p className="text-xs text-kumo-subtle">
+        <p className="text-xs text-gray-11">
           Other apps can be connected by asking Eve in chat — this list covers the common ones.
         </p>
       )}
@@ -449,7 +448,7 @@ function SkillsTab() {
         const isExpanded = expanded === skill.name;
         const isEditing = editing === skill.name;
         return (
-          <li key={skill.name} className="border-b border-kumo-hairline py-2 last:border-b-0">
+          <li key={skill.name} className="border-b border-gray-a4 py-2 last:border-b-0">
             <div className="flex items-center gap-1">
               <ExpandCaret
                 expanded={isExpanded}
@@ -461,7 +460,7 @@ function SkillsTab() {
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-mono text-sm">/{skill.name}</p>
-                <p className="truncate text-xs text-kumo-subtle" title={skill.description}>
+                <p className="truncate text-xs text-gray-11" title={skill.description}>
                   {skill.description}
                 </p>
               </div>
@@ -480,26 +479,23 @@ function SkillsTab() {
               />
             </div>
             {isExpanded && !isEditing && (
-              <pre className="mt-2 max-h-64 overflow-y-auto rounded-md bg-kumo-recessed p-3 text-xs whitespace-pre-wrap text-kumo-subtle [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <pre className="mt-2 max-h-64 overflow-y-auto rounded-md bg-gray-a2 p-3 text-xs whitespace-pre-wrap text-gray-11 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {skill.markdown}
               </pre>
             )}
             {isExpanded && isEditing && (
               <div className="mt-2 flex flex-col gap-2">
-                <Input
-                  size="sm"
+                <TextField.Input
+                  size="2"
                   value={draftDescription}
                   aria-label="Skill description"
                   placeholder="When should Eve use this skill?"
                   onChange={(event) => setDraftDescription(event.target.value)}
                 />
-                <InputArea
+                <TextArea
                   value={draftMarkdown}
                   aria-label="Skill instructions"
-                  autoResize
-                  minRows={6}
-                  maxRows={14}
-                  className="font-mono text-xs"
+                  className="[&>textarea]:field-sizing-content [&>textarea]:min-h-32 [&>textarea]:max-h-80 [&>textarea]:font-mono [&>textarea]:text-xs"
                   onChange={(event) => setDraftMarkdown(event.target.value)}
                 />
                 <div className="flex justify-end gap-2">
@@ -524,6 +520,22 @@ function SkillsTab() {
   );
 }
 
+interface FeatureFlags {
+  memory: boolean;
+  proactive: boolean;
+  integrations: boolean;
+  skills: boolean;
+}
+
+// Personal deployments have everything; builder deployments report what they
+// shipped via /api/features so tabs for absent features never render.
+const ALL_FEATURES_ON: FeatureFlags = {
+  memory: true,
+  proactive: true,
+  integrations: true,
+  skills: true,
+};
+
 export function ManagePanel({
   onOpenThread,
 }: {
@@ -531,11 +543,21 @@ export function ManagePanel({
   onOpenThread: (threadId: string) => void;
 }) {
   const [tab, setTab] = useState("reminders");
+  const [features, setFeatures] = useState<FeatureFlags>(ALL_FEATURES_ON);
   const [reminders, setReminders] = useState<ReminderItem[] | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookItem[] | null>(null);
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [memories, setMemories] = useState<MemoryItem[] | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<string | null>(null);
+
+  useEffect(() => {
+    void fetch("/api/features")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: Partial<FeatureFlags> | null) => {
+        if (body !== null) setFeatures({ ...ALL_FEATURES_ON, ...body });
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     void fetch("/api/automations")
@@ -595,23 +617,41 @@ export function ManagePanel({
     return runs.filter((run) => run.kind === kind && run.automationId === id);
   }
 
-  return (
-    <div>
-      <Tabs
-        size="sm"
-        // Hug the tab labels like the Kumo docs demo instead of stretching
-        // the segmented track across the whole page column.
-        className="w-fit max-w-full"
-        value={tab}
-        onValueChange={setTab}
-        tabs={[
+  const visibleTabs = [
+    ...(features.proactive
+      ? [
           { value: "reminders", label: `Reminders${reminders ? ` (${reminders.length})` : ""}` },
           { value: "webhooks", label: `Triggers${webhooks ? ` (${webhooks.length})` : ""}` },
-          { value: "memory", label: `Memory${memories ? ` (${memories.length})` : ""}` },
-          { value: "connections", label: "Connections" },
-          { value: "skills", label: "Skills" },
-        ]}
-      />
+        ]
+      : []),
+    ...(features.memory
+      ? [{ value: "memory", label: `Memory${memories ? ` (${memories.length})` : ""}` }]
+      : []),
+    ...(features.integrations ? [{ value: "connections", label: "Connections" }] : []),
+    ...(features.skills ? [{ value: "skills", label: "Skills" }] : []),
+  ];
+
+  // If the active tab's feature turns out to be absent, land on the first
+  // tab that exists instead of an empty pane.
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.some((entry) => entry.value === tab)) {
+      setTab(visibleTabs[0].value);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the derived list
+  }, [features, tab]);
+
+  return (
+    <div>
+      <Tabs.Root value={tab} onValueChange={(value) => setTab(value as string)}>
+        {/* Hug the tab labels instead of stretching across the page column. */}
+        <Tabs.List size="1" className="w-fit max-w-full">
+          {visibleTabs.map((entry) => (
+            <Tabs.Trigger key={entry.value} value={entry.value}>
+              {entry.label}
+            </Tabs.Trigger>
+          ))}
+        </Tabs.List>
+      </Tabs.Root>
 
       <div className="mt-3 min-h-40">
         {tab === "reminders" &&
@@ -629,7 +669,7 @@ export function ManagePanel({
                 return (
                   <li
                     key={reminder.id}
-                    className="border-b border-kumo-hairline py-2 last:border-b-0"
+                    className="border-b border-gray-a4 py-2 last:border-b-0"
                   >
                     <div className="flex items-center gap-2">
                       <ExpandCaret
@@ -643,13 +683,13 @@ export function ManagePanel({
                         <p className="truncate text-sm" title={reminder.prompt}>
                           {reminder.prompt}
                         </p>
-                        <p className="mt-0.5 text-xs text-kumo-subtle">
+                        <p className="mt-0.5 text-xs text-gray-11">
                           Next: {formatWhen(reminder.nextFireAt)}
                           {reminder.cron !== null && ` · ${reminder.cron} (${reminder.timezone})`}
                           {history.length > 0 && ` · ran ${history.length}×`}
                         </p>
                       </div>
-                      <Badge variant="secondary">
+                      <Badge variant="soft" color="gray">
                         {reminder.cron === null ? "one-off" : "recurring"}
                       </Badge>
                       <DeleteButton
@@ -677,7 +717,7 @@ export function ManagePanel({
                 const history = runsFor("webhook", hook.id);
                 const expanded = expandedRuns === `webhook:${hook.id}`;
                 return (
-                  <li key={hook.id} className="border-b border-kumo-hairline py-2 last:border-b-0">
+                  <li key={hook.id} className="border-b border-gray-a4 py-2 last:border-b-0">
                     <div className="flex items-center gap-2">
                       <ExpandCaret
                         expanded={expanded}
@@ -686,10 +726,10 @@ export function ManagePanel({
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{hook.name}</p>
-                        <p className="mt-0.5 truncate text-xs text-kumo-subtle" title={hook.prompt}>
+                        <p className="mt-0.5 truncate text-xs text-gray-11" title={hook.prompt}>
                           {hook.prompt}
                         </p>
-                        <p className="mt-0.5 text-xs text-kumo-subtle">
+                        <p className="mt-0.5 text-xs text-gray-11">
                           Fired {hook.fireCount} {hook.fireCount === 1 ? "time" : "times"} · last{" "}
                           {formatWhen(hook.lastFiredAt)}
                         </p>
@@ -717,15 +757,15 @@ export function ManagePanel({
               {memories.map((memory) => (
                 <li
                   key={memory.id}
-                  className="flex items-center gap-3 border-b border-kumo-hairline py-2.5 last:border-b-0"
+                  className="flex items-center gap-3 border-b border-gray-a4 py-2.5 last:border-b-0"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm break-words">{memory.content}</p>
-                    <p className="mt-0.5 text-xs text-kumo-subtle">
+                    <p className="mt-0.5 text-xs text-gray-11">
                       Updated {formatWhen(memory.updatedAt)}
                     </p>
                   </div>
-                  {memory.permanent && <Badge variant="secondary">permanent</Badge>}
+                  {memory.permanent && <Badge variant="soft" color="gray">permanent</Badge>}
                   <DeleteButton label="Forget memory" onDelete={() => forgetMemory(memory.id)} />
                 </li>
               ))}
