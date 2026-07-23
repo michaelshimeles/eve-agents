@@ -24,8 +24,10 @@ import {
 // (features + version), agent/instructions.md (possibly hand-edited), and
 // generated custom schedule files — then reassembled against the latest
 // template and deployed into the same project. Env vars are left untouched
-// except the version stamps, so keys, VAPID pair, and storage connections
-// all survive. Works with just a Vercel token; the builder stores nothing.
+// except builder deep-link stamps (project name + builder URL); template
+// version/release live in baked source (lib/eve-template-stamp.ts) so a
+// failed rebuild can't suppress the manage-page banner. Keys, VAPID, and
+// storage connections all survive. Works with just a Vercel token.
 //
 // Provenance: git-linked projects are rejected, and eve-builder.json is
 // required. Path checks / runtime feature env keys alone aren't enough —
@@ -36,28 +38,8 @@ export const maxDuration = 120;
 interface UpdateRequest {
   token?: unknown;
   teamId?: unknown;
-  action?: unknown; // "projects" | "inspect" | "update" | "rollback-stamps"
+  action?: unknown; // "projects" | "inspect" | "update"
   projectName?: unknown;
-  /** Prior stamps for rollback-stamps (null/omitted → release "0"). */
-  previousVersion?: unknown;
-  previousRelease?: unknown;
-}
-
-function stampRollbackEnv(
-  previousVersion: string | null,
-  previousRelease: number | null,
-): { key: string; value: string }[] {
-  return [
-    ...(previousVersion !== null
-      ? [{ key: "EVE_TEMPLATE_VERSION", value: previousVersion }]
-      : []),
-    {
-      key: "EVE_TEMPLATE_RELEASE",
-      // "0" is never offered as current (update check needs release >= 1),
-      // so a first-time stamp that failed to deploy won't suppress retries.
-      value: String(previousRelease ?? 0),
-    },
-  ];
 }
 
 /** Exact path match, else any depth-tolerant suffix match. */
@@ -218,36 +200,7 @@ export async function POST(request: Request): Promise<Response> {
     if (typeof body.projectName !== "string" || body.projectName.trim().length === 0) {
       return Response.json({ error: "Missing project name" }, { status: 400 });
     }
-    const projectName = body.projectName.trim();
-
-    // Restore prior stamps after an accepted deploy whose build later failed.
-    // Does not re-read the deployment tree — the client passes the stamps from
-    // the update response (which reflected the still-live agent at start time).
-    if (action === "rollback-stamps") {
-      const project = await getProject(token, teamId, projectName);
-      if (project === null) {
-        return Response.json({ error: `No project named "${projectName}".` }, { status: 404 });
-      }
-      const previousVersion =
-        typeof body.previousVersion === "string" && body.previousVersion.length > 0
-          ? body.previousVersion
-          : null;
-      const previousRelease =
-        typeof body.previousRelease === "number" && Number.isFinite(body.previousRelease)
-          ? body.previousRelease
-          : typeof body.previousRelease === "string" && /^\d+$/.test(body.previousRelease)
-            ? Number.parseInt(body.previousRelease, 10)
-            : null;
-      await upsertEnv(
-        token,
-        teamId,
-        project.id,
-        stampRollbackEnv(previousVersion, previousRelease),
-      );
-      return Response.json({ ok: true });
-    }
-
-    const agent = await readDeployedAgent(token, teamId, projectName);
+    const agent = await readDeployedAgent(token, teamId, body.projectName.trim());
 
     if (action === "inspect") {
       return Response.json({
@@ -297,39 +250,15 @@ export async function POST(request: Request): Promise<Response> {
     });
     files.push(...carried);
 
-    // Stamp before createDeployment so the new build sees the new release.
-    // If createDeployment throws, roll stamps back here. If Vercel accepts
-    // the deploy and the build later fails, the client calls rollback-stamps.
+    // Deep-link stamps only — template version/release are baked into
+    // lib/eve-template-stamp.ts in `files`, so a failed build leaves the
+    // live agent on its previous release identity with no env rollback.
     const builderUrl = new URL(request.url).origin;
     await upsertEnv(token, teamId, agent.projectId, [
-      { key: "EVE_TEMPLATE_VERSION", value: latest.version },
-      { key: "EVE_TEMPLATE_RELEASE", value: String(latest.release) },
       { key: "EVE_PROJECT_NAME", value: agent.projectName },
       { key: "EVE_BUILDER_URL", value: builderUrl },
     ]);
-    let deployment;
-    try {
-      deployment = await createDeployment(token, teamId, agent.projectName, files);
-    } catch (error) {
-      const deployMessage = error instanceof Error ? error.message : "Deployment failed";
-      try {
-        await upsertEnv(
-          token,
-          teamId,
-          agent.projectId,
-          stampRollbackEnv(agent.currentVersion, agent.currentRelease),
-        );
-      } catch (rollbackError) {
-        const rollbackMessage =
-          rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
-        console.error("failed to roll back template stamps after deploy failure:", rollbackError);
-        throw new InspectError(
-          `${deployMessage} Also failed to restore the previous template stamps (${rollbackMessage}). The agent may stop offering this update until stamps are fixed — retry the update or set EVE_TEMPLATE_RELEASE back to ${agent.currentRelease ?? 0}.`,
-          502,
-        );
-      }
-      throw error;
-    }
+    const deployment = await createDeployment(token, teamId, agent.projectName, files);
     return Response.json({
       projectId: agent.projectId,
       projectName: agent.projectName,

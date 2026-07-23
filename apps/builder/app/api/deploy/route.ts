@@ -47,9 +47,9 @@ function buildEnv(config: AgentConfig, stamps: UpdateStamps): EnvVar[] {
     { key: "EVE_ENABLED_FEATURES", value: config.features.join(",") },
     { key: "NEXT_PUBLIC_VAPID_PUBLIC_KEY", value: vapid.publicKey },
     { key: "VAPID_PRIVATE_KEY", value: vapid.privateKey },
-    // How the deployed agent knows which template it runs and where updates
-    // come from: the manage page checks EVE_BUILDER_URL/api/template-version
-    // and links back to the builder's update flow. release (from
+    // Deep-link + legacy env identity. The manage page prefers the baked
+    // lib/eve-template-stamp.ts for release ordering; env keeps older agents
+    // and the update deep-link working. release (from
     // apps/eve/.eve-template-release) orders templates so a content
     // rollback isn't offered as an upgrade.
     { key: "EVE_TEMPLATE_VERSION", value: stamps.templateVersion },
