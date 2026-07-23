@@ -21,6 +21,13 @@ description: Run and test the Eve web chat app (apps/eve) end-to-end locally —
 4. Typecheck: `cd apps/eve && npm run typecheck`.
 
 ## Smoke-testing agent behavior via the Eve session API
+`/eve/v1/**` is served on the same origin: `withEve` (next.config.ts) mounts the
+agent service into the Next.js dev server. It only 404s while the embedded agent
+backend is still booting — wait for `[eve:dev] server listening` in `/tmp/dev.log`
+before curling:
+```bash
+until curl -sf localhost:3000/eve/v1/health >/dev/null; do sleep 2; done
+```
 Canonical routes (there is NO `/eve/v1/message`):
 ```bash
 # start a session (returns sessionId)
