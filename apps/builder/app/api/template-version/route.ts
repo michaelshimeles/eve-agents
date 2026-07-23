@@ -1,13 +1,14 @@
-import { templateVersion } from "@/lib/assemble";
+import { templateInfo } from "@/lib/assemble";
 
-// Public, unauthenticated: the version (content hash) of the agent template
-// bundled into this builder deployment. Deployed agents call this to detect
-// that a newer template is available; the update flow shows it as "latest".
+// Public, unauthenticated: identity of the agent template bundled into this
+// builder deployment. Deployed agents call this to detect updates; they use
+// `version` for equality and `publishedAt` so a builder rollback isn't
+// offered as an upgrade.
 
 export async function GET(): Promise<Response> {
-  const version = await templateVersion();
+  const info = await templateInfo();
   return Response.json(
-    { version },
+    { version: info.version, publishedAt: info.publishedAt },
     {
       headers: {
         // Deployed agents fetch this cross-origin from their own server and

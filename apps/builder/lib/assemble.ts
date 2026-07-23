@@ -28,9 +28,17 @@ export const BUILDER_MANIFEST_FILE = "eve-builder.json";
 
 export interface BuilderManifest {
   templateVersion: string;
+  /** ISO timestamp used to order templates so a builder rollback isn't offered as an update. */
+  templatePublishedAt: string;
   features: FeatureId[];
   projectName: string;
   deployedAt: string;
+}
+
+export interface TemplateInfo {
+  version: string;
+  /** Max mtime of the template files — increases when the template changes, falls back on rollback. */
+  publishedAt: string;
 }
 
 /**
@@ -79,27 +87,37 @@ async function walk(root: string, dir: string, out: string[]): Promise<void> {
 }
 
 /**
- * The template version: a content hash over every template file (pre-pruning,
- * pre-transform). Deterministic — two builder deployments bundling identical
- * apps/eve sources report the same version — and changes exactly when the
- * template changes. Deployed agents compare their stamped version against
- * /api/template-version to detect updates.
+ * Template identity for update detection: a content hash (equality) plus the
+ * newest template-file mtime (ordering). Deployed agents treat an update as
+ * available only when the hash differs and publishedAt is strictly newer, so
+ * rolling the builder back to an older deployment can't look like an upgrade.
  */
-let cachedVersion: Promise<string> | null = null;
-export function templateVersion(): Promise<string> {
-  cachedVersion ??= (async () => {
+let cachedTemplateInfo: Promise<TemplateInfo> | null = null;
+export function templateInfo(): Promise<TemplateInfo> {
+  cachedTemplateInfo ??= (async () => {
     const root = await templateRoot();
     const files: string[] = [];
     await walk(root, root, files);
     const hash = createHash("sha256");
+    let newestMtimeMs = 0;
     for (const relative of files.sort()) {
+      const absolute = path.join(root, relative);
+      const [contents, fileStat] = await Promise.all([readFile(absolute), stat(absolute)]);
       hash.update(relative);
       hash.update("\0");
-      hash.update(await readFile(path.join(root, relative)));
+      hash.update(contents);
+      if (fileStat.mtimeMs > newestMtimeMs) newestMtimeMs = fileStat.mtimeMs;
     }
-    return hash.digest("hex").slice(0, 12);
+    return {
+      version: hash.digest("hex").slice(0, 12),
+      publishedAt: new Date(newestMtimeMs).toISOString(),
+    };
   })();
-  return cachedVersion;
+  return cachedTemplateInfo;
+}
+
+export async function templateVersion(): Promise<string> {
+  return (await templateInfo()).version;
 }
 
 /** All template file paths that ship for this feature selection (pre-transform). */
@@ -143,8 +161,10 @@ export async function assembleDeployment(input: AssembleInput): Promise<DeployFi
     });
   });
 
+  const info = await templateInfo();
   const manifest: BuilderManifest = {
-    templateVersion: await templateVersion(),
+    templateVersion: info.version,
+    templatePublishedAt: info.publishedAt,
     features: [...input.features],
     projectName: input.projectName,
     deployedAt: new Date().toISOString(),

@@ -351,18 +351,30 @@ export async function listProjects(
   }));
 }
 
+export interface ProjectDetails {
+  id: string;
+  name: string;
+  /** True when the project is linked to a git repository (builder deploys never are). */
+  hasGitRepository: boolean;
+}
+
 /** Looks up an existing project by name; null when it doesn't exist. */
 export async function getProject(
   token: string,
   teamId: string | null,
   name: string,
-): Promise<{ id: string; name: string } | null> {
+): Promise<ProjectDetails | null> {
   try {
-    const project = await api<{ id: string; name: string }>(
-      `/v9/projects/${encodeURIComponent(name)}`,
-      { token, teamId, stage: "project" },
-    );
-    return { id: project.id, name: project.name };
+    const project = await api<{
+      id: string;
+      name: string;
+      link?: { type?: string; repo?: string; repoId?: number } | null;
+    }>(`/v9/projects/${encodeURIComponent(name)}`, { token, teamId, stage: "project" });
+    return {
+      id: project.id,
+      name: project.name,
+      hasGitRepository: project.link != null && typeof project.link === "object",
+    };
   } catch (error) {
     if (error instanceof VercelApiError && error.status === 404) return null;
     throw error;

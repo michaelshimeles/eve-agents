@@ -152,7 +152,7 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
     }
   }
 
-  function pollStatus(deploymentId: string) {
+  function pollStatus(deploymentId: string, consecutiveFailures = 0) {
     if (pollTimer.current !== null) clearTimeout(pollTimer.current);
     pollTimer.current = setTimeout(() => {
       void (async () => {
@@ -200,10 +200,23 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
             });
             return;
           }
-          pollStatus(deploymentId);
+          pollStatus(deploymentId, 0);
         } catch (error) {
           console.error("status poll failed:", error);
-          pollStatus(deploymentId);
+          // Cap retries so a revoked token / deleted deployment / network
+          // outage surfaces an error instead of polling forever.
+          if (consecutiveFailures >= 5) {
+            setPhase({
+              kind: "error",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Lost contact with Vercel while waiting for the build.",
+              log: null,
+            });
+            return;
+          }
+          pollStatus(deploymentId, consecutiveFailures + 1);
         }
       })();
     }, 3500);
