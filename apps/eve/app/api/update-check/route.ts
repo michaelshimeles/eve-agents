@@ -3,12 +3,13 @@ import { requireWebAuth } from "@/lib/web-auth";
 // Whether a newer agent template is available. Builder-deployed agents carry
 // env stamps for the template they were assembled from and the builder that
 // deployed them. The personal app has none of these and always reports "no
-// update". Updates require both a different content hash and a newer
-// publishedAt, so rolling the builder back can't look like an upgrade.
+// update". Updates require latest.release > current.release (monotonic
+// integer from apps/eve/.eve-template-release), so restoring older template
+// content can't look like an upgrade.
 
 interface LatestTemplate {
   version: string;
-  publishedAt: string | null;
+  release: number | null;
 }
 
 /** The builder's latest template identity, memoized per instance for a few minutes. */
@@ -25,17 +26,18 @@ async function fetchLatestTemplate(builderUrl: string): Promise<LatestTemplate |
   if (!response.ok) return null;
   const body = (await response.json().catch(() => null)) as {
     version?: unknown;
-    publishedAt?: unknown;
+    release?: unknown;
   } | null;
   if (body === null || typeof body.version !== "string" || body.version.length === 0) {
     return null;
   }
-  const info: LatestTemplate = {
-    version: body.version,
-    publishedAt: typeof body.publishedAt === "string" && body.publishedAt.length > 0
-      ? body.publishedAt
-      : null,
-  };
+  const release =
+    typeof body.release === "number" && Number.isFinite(body.release)
+      ? body.release
+      : typeof body.release === "string" && /^\d+$/.test(body.release)
+        ? Number.parseInt(body.release, 10)
+        : null;
+  const info: LatestTemplate = { version: body.version, release };
   cachedLatest = { info, fetchedAt: Date.now() };
   return info;
 }
@@ -45,7 +47,7 @@ export async function GET(request: Request): Promise<Response> {
   if (denied !== null) return denied;
 
   const current = process.env.EVE_TEMPLATE_VERSION ?? "";
-  const currentPublishedAt = process.env.EVE_TEMPLATE_PUBLISHED_AT ?? "";
+  const currentReleaseRaw = process.env.EVE_TEMPLATE_RELEASE ?? "";
   const builderUrl = process.env.EVE_BUILDER_URL ?? "";
   if (current.length === 0 || builderUrl.length === 0) {
     return Response.json({ updateAvailable: false });
@@ -55,14 +57,17 @@ export async function GET(request: Request): Promise<Response> {
     const latest = await fetchLatestTemplate(builderUrl);
     if (latest === null) return Response.json({ updateAvailable: false });
 
-    // Content-hash equality is definitive "up to date". When hashes differ,
-    // require a newer publishedAt so a rolled-back builder isn't offered as
-    // an upgrade. Agents that predate publishedAt keep the inequality check.
+    const currentRelease = /^\d+$/.test(currentReleaseRaw)
+      ? Number.parseInt(currentReleaseRaw, 10)
+      : null;
+
+    // Prefer monotonic release ordering. Agents that predate the release
+    // stamp fall back to content-hash inequality so they still see a banner
+    // once — after one update they carry a release and stay safe.
     const updateAvailable =
-      latest.version !== current &&
-      (currentPublishedAt.length === 0 ||
-        latest.publishedAt === null ||
-        latest.publishedAt > currentPublishedAt);
+      latest.release !== null && currentRelease !== null
+        ? latest.release > currentRelease
+        : latest.version !== current;
 
     const projectName = process.env.EVE_PROJECT_NAME ?? "";
     const updateUrl = new URL(

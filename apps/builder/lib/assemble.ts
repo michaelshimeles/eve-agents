@@ -26,10 +26,13 @@ export interface DeployFile {
  */
 export const BUILDER_MANIFEST_FILE = "eve-builder.json";
 
+/** Checked into apps/eve; bump when shipping a template change that agents should pick up. */
+export const TEMPLATE_RELEASE_FILE = ".eve-template-release";
+
 export interface BuilderManifest {
   templateVersion: string;
-  /** ISO timestamp used to order templates so a builder rollback isn't offered as an update. */
-  templatePublishedAt: string;
+  /** Monotonic release from apps/eve/.eve-template-release — orders updates safely. */
+  templateRelease: number;
   features: FeatureId[];
   projectName: string;
   deployedAt: string;
@@ -37,8 +40,8 @@ export interface BuilderManifest {
 
 export interface TemplateInfo {
   version: string;
-  /** Max mtime of the template files — increases when the template changes, falls back on rollback. */
-  publishedAt: string;
+  /** Integer from apps/eve/.eve-template-release; must increase for an update to be offered. */
+  release: number;
 }
 
 /**
@@ -87,10 +90,11 @@ async function walk(root: string, dir: string, out: string[]): Promise<void> {
 }
 
 /**
- * Template identity for update detection: a content hash (equality) plus the
- * newest template-file mtime (ordering). Deployed agents treat an update as
- * available only when the hash differs and publishedAt is strictly newer, so
- * rolling the builder back to an older deployment can't look like an upgrade.
+ * Template identity for update detection: a content hash (display / equality)
+ * plus a checked-in monotonic release integer (ordering). Deployed agents
+ * only offer an update when latest.release > current.release, so restoring
+ * older template files — even with newer filesystem mtimes — can't look like
+ * an upgrade. Bump apps/eve/.eve-template-release when shipping changes.
  */
 let cachedTemplateInfo: Promise<TemplateInfo> | null = null;
 export function templateInfo(): Promise<TemplateInfo> {
@@ -99,18 +103,21 @@ export function templateInfo(): Promise<TemplateInfo> {
     const files: string[] = [];
     await walk(root, root, files);
     const hash = createHash("sha256");
-    let newestMtimeMs = 0;
     for (const relative of files.sort()) {
-      const absolute = path.join(root, relative);
-      const [contents, fileStat] = await Promise.all([readFile(absolute), stat(absolute)]);
       hash.update(relative);
       hash.update("\0");
-      hash.update(contents);
-      if (fileStat.mtimeMs > newestMtimeMs) newestMtimeMs = fileStat.mtimeMs;
+      hash.update(await readFile(path.join(root, relative)));
+    }
+    const releaseRaw = (await readFile(path.join(root, TEMPLATE_RELEASE_FILE), "utf8")).trim();
+    const release = Number.parseInt(releaseRaw, 10);
+    if (!Number.isFinite(release) || release < 1) {
+      throw new Error(
+        `${TEMPLATE_RELEASE_FILE} must contain a positive integer (got ${JSON.stringify(releaseRaw)})`,
+      );
     }
     return {
       version: hash.digest("hex").slice(0, 12),
-      publishedAt: new Date(newestMtimeMs).toISOString(),
+      release,
     };
   })();
   return cachedTemplateInfo;
@@ -164,7 +171,7 @@ export async function assembleDeployment(input: AssembleInput): Promise<DeployFi
   const info = await templateInfo();
   const manifest: BuilderManifest = {
     templateVersion: info.version,
-    templatePublishedAt: info.publishedAt,
+    templateRelease: info.release,
     features: [...input.features],
     projectName: input.projectName,
     deployedAt: new Date().toISOString(),

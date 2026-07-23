@@ -36,7 +36,7 @@ interface DeployRequest {
 /** Env stamps that let a deployed agent identify itself for later updates. */
 interface UpdateStamps {
   templateVersion: string;
-  templatePublishedAt: string;
+  templateRelease: number;
   builderUrl: string;
 }
 
@@ -49,10 +49,11 @@ function buildEnv(config: AgentConfig, stamps: UpdateStamps): EnvVar[] {
     { key: "VAPID_PRIVATE_KEY", value: vapid.privateKey },
     // How the deployed agent knows which template it runs and where updates
     // come from: the manage page checks EVE_BUILDER_URL/api/template-version
-    // and links back to the builder's update flow. publishedAt orders
-    // templates so a builder rollback isn't offered as an upgrade.
+    // and links back to the builder's update flow. release (from
+    // apps/eve/.eve-template-release) orders templates so a content
+    // rollback isn't offered as an upgrade.
     { key: "EVE_TEMPLATE_VERSION", value: stamps.templateVersion },
-    { key: "EVE_TEMPLATE_PUBLISHED_AT", value: stamps.templatePublishedAt },
+    { key: "EVE_TEMPLATE_RELEASE", value: String(stamps.templateRelease) },
     { key: "EVE_PROJECT_NAME", value: config.projectName },
     { key: "EVE_BUILDER_URL", value: stamps.builderUrl },
   ];
@@ -167,7 +168,7 @@ export async function POST(request: Request): Promise<Response> {
   const info = await templateInfo();
   const stamps = {
     templateVersion: info.version,
-    templatePublishedAt: info.publishedAt,
+    templateRelease: info.release,
     builderUrl: new URL(request.url).origin,
   };
 

@@ -2,13 +2,13 @@ import { templateInfo } from "@/lib/assemble";
 
 // Public, unauthenticated: identity of the agent template bundled into this
 // builder deployment. Deployed agents call this to detect updates; they use
-// `version` for equality and `publishedAt` so a builder rollback isn't
-// offered as an upgrade.
+// `release` (monotonic, checked into apps/eve) so a content rollback can't
+// look like an upgrade, and `version` (content hash) for display.
 
 export async function GET(): Promise<Response> {
   const info = await templateInfo();
   return Response.json(
-    { version: info.version, publishedAt: info.publishedAt },
+    { version: info.version, release: info.release },
     {
       headers: {
         // Deployed agents fetch this cross-origin from their own server and

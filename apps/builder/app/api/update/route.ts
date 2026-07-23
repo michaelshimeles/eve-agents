@@ -245,7 +245,7 @@ export async function POST(request: Request): Promise<Response> {
     // storage-injected values) stays exactly as it is.
     await upsertEnv(token, teamId, agent.projectId, [
       { key: "EVE_TEMPLATE_VERSION", value: latest.version },
-      { key: "EVE_TEMPLATE_PUBLISHED_AT", value: latest.publishedAt },
+      { key: "EVE_TEMPLATE_RELEASE", value: String(latest.release) },
       { key: "EVE_PROJECT_NAME", value: agent.projectName },
       { key: "EVE_BUILDER_URL", value: new URL(request.url).origin },
     ]);
