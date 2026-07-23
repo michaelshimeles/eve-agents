@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, DropdownMenu, Tabs, TextArea, TextField } from "frosted-ui";
-import { Button, Loader } from "@/components/ui/compat";
+import { Button, LinkButton, Loader } from "@/components/ui/compat";
 import {
   ArrowSquareOutIcon,
   CaretDownIcon,
@@ -74,6 +74,13 @@ interface SkillItem {
   description: string;
   markdown: string;
   updatedAt: string;
+}
+
+interface UpdateInfo {
+  updateAvailable: boolean;
+  currentVersion?: string;
+  latestVersion?: string;
+  updateUrl?: string;
 }
 
 function formatWhen(iso: string | null): string {
@@ -559,6 +566,16 @@ export function ManagePanel({
       .catch(() => undefined);
   }, []);
 
+  // Builder-deployed agents know which template version they run; ask the
+  // builder whether a newer one exists. The personal app reports "no update".
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  useEffect(() => {
+    void fetch("/api/update-check")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: UpdateInfo | null) => setUpdate(body))
+      .catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     void fetch("/api/automations")
       .then((response) => (response.ok ? response.json() : null))
@@ -642,6 +659,34 @@ export function ManagePanel({
 
   return (
     <div>
+      {update?.updateAvailable === true && update.updateUrl !== undefined && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent-a6 bg-accent-a2 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-gray-12">
+              A newer version of this agent is available
+            </p>
+            <p className="mt-0.5 text-xs text-gray-11">
+              Updating takes a few minutes and keeps your chats, memories, connections, skills,
+              and settings.
+              {update.currentVersion !== undefined && update.latestVersion !== undefined && (
+                <span className="ms-1 font-mono">
+                  {update.currentVersion} → {update.latestVersion}
+                </span>
+              )}
+            </p>
+          </div>
+          <LinkButton
+            variant="primary"
+            size="sm"
+            external
+            href={update.updateUrl}
+            target="_blank"
+          >
+            Update
+            <ArrowSquareOutIcon className="size-3.5" />
+          </LinkButton>
+        </div>
+      )}
       <Tabs.Root value={tab} onValueChange={(value) => setTab(value as string)}>
         {/* Hug the tab labels instead of stretching across the page column. */}
         <Tabs.List size="1" className="w-fit max-w-full">

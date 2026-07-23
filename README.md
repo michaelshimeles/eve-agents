@@ -34,6 +34,7 @@ A personal AI assistant ("Eve") in the spirit of OpenClaw — proactive, always-
 - The template is the live `apps/eve` source — assembled at deploy time with feature pruning, so the personal agent and the product never drift. A manifest completeness check fails CI if a new tool isn't mapped to a feature.
 - Deploys via the Vercel REST API with the user's token: create project → set env vars → deploy inline files → stream build status → health check. Keys pass through in memory and are never stored; VAPID push keys are generated automatically; models bill to the deployer's own AI Gateway (no provider keys).
 - Telegram webhook registration happens automatically after deploy when a bot token is provided.
+- **One-click updates** — every deployment is stamped with a template version (a content hash of `apps/eve`) plus an `eve-builder.json` manifest, and agents show an "update available" banner on their manage page when the builder ships a newer template. The banner deep-links to the builder's *Update an agent* tab, where the owner pastes their Vercel token and clicks once: the builder reads the agent's features, (possibly hand-edited) instructions, and custom schedules back out of the deployed files, reassembles them on the latest template, and redeploys into the same project. Env vars, VAPID keys, storage connections, chat history, memories, skills, and the URL are all untouched; agents deployed before versioning are handled by inferring their feature set from the shipped files.
 
 ## Structure
 

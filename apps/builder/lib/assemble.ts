@@ -1,13 +1,15 @@
+import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import type { AgentConfig } from "./config";
+import type { CustomSchedule, FeatureId } from "./config";
 import { allowedPrunableFiles, isExcluded, isPrunable } from "./manifest";
 import { generateScheduleFile, scheduleSlug } from "./schedule-codegen";
 
 // Turns the live apps/eve source into the file set for one configured
 // deployment: walk, filter (exclusions + feature pruning), transform
-// (instructions, package name), and append generated schedule files.
+// (instructions, package name), and append generated schedule files plus a
+// small manifest (eve-builder.json) describing what was deployed.
 
 export interface DeployFile {
   /** Path inside the deployment, POSIX-style. */
@@ -15,6 +17,32 @@ export interface DeployFile {
   /** Base64 contents (works uniformly for text and binary). */
   data: string;
   encoding: "base64";
+}
+
+/**
+ * Baked into every deployment so the update flow can read a deployed agent's
+ * configuration back out of its own files (via the Vercel deployment-files
+ * API) — the builder stores nothing, so the deployment is the record.
+ */
+export const BUILDER_MANIFEST_FILE = "eve-builder.json";
+
+export interface BuilderManifest {
+  templateVersion: string;
+  features: FeatureId[];
+  projectName: string;
+  deployedAt: string;
+}
+
+/**
+ * What assembly actually needs — a structural subset of the wizard's
+ * AgentConfig, so the update flow (which reconstructs these fields from a
+ * deployed agent) can assemble without the rest of the config.
+ */
+export interface AssembleInput {
+  projectName: string;
+  features: readonly FeatureId[];
+  instructions: string;
+  schedules: readonly CustomSchedule[];
 }
 
 /** Locates apps/eve both in dev (cwd = apps/builder) and in the traced Vercel bundle. */
@@ -50,29 +78,53 @@ async function walk(root: string, dir: string, out: string[]): Promise<void> {
   }
 }
 
+/**
+ * The template version: a content hash over every template file (pre-pruning,
+ * pre-transform). Deterministic — two builder deployments bundling identical
+ * apps/eve sources report the same version — and changes exactly when the
+ * template changes. Deployed agents compare their stamped version against
+ * /api/template-version to detect updates.
+ */
+let cachedVersion: Promise<string> | null = null;
+export function templateVersion(): Promise<string> {
+  cachedVersion ??= (async () => {
+    const root = await templateRoot();
+    const files: string[] = [];
+    await walk(root, root, files);
+    const hash = createHash("sha256");
+    for (const relative of files.sort()) {
+      hash.update(relative);
+      hash.update("\0");
+      hash.update(await readFile(path.join(root, relative)));
+    }
+    return hash.digest("hex").slice(0, 12);
+  })();
+  return cachedVersion;
+}
+
 /** All template file paths that ship for this feature selection (pre-transform). */
-export async function templateFiles(config: AgentConfig): Promise<string[]> {
+export async function templateFiles(features: readonly FeatureId[]): Promise<string[]> {
   const root = await templateRoot();
   const files: string[] = [];
   await walk(root, root, files);
-  const allowed = allowedPrunableFiles(config.features);
+  const allowed = allowedPrunableFiles(features);
   return files.filter((file) => !isPrunable(file) || allowed.has(file)).sort();
 }
 
 /** Assembles the complete deployment file set for the Vercel API. */
-export async function assembleDeployment(config: AgentConfig): Promise<DeployFile[]> {
+export async function assembleDeployment(input: AssembleInput): Promise<DeployFile[]> {
   const root = await templateRoot();
-  const paths = await templateFiles(config);
+  const paths = await templateFiles(input.features);
   const out: DeployFile[] = [];
 
   for (const relative of paths) {
     let data: Buffer = await readFile(path.join(root, relative));
 
     if (relative === "agent/instructions.md") {
-      data = Buffer.from(config.instructions, "utf8");
+      data = Buffer.from(input.instructions, "utf8");
     } else if (relative === "package.json") {
       const parsed = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
-      parsed.name = config.projectName;
+      parsed.name = input.projectName;
       data = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8");
     }
 
@@ -80,7 +132,7 @@ export async function assembleDeployment(config: AgentConfig): Promise<DeployFil
   }
 
   const usedSlugs = new Set<string>();
-  config.schedules.forEach((schedule, index) => {
+  input.schedules.forEach((schedule, index) => {
     let slug = scheduleSlug(schedule.name, index);
     while (usedSlugs.has(slug)) slug = `${slug}-${index + 1}`;
     usedSlugs.add(slug);
@@ -89,6 +141,18 @@ export async function assembleDeployment(config: AgentConfig): Promise<DeployFil
       data: Buffer.from(generateScheduleFile(schedule), "utf8").toString("base64"),
       encoding: "base64",
     });
+  });
+
+  const manifest: BuilderManifest = {
+    templateVersion: await templateVersion(),
+    features: [...input.features],
+    projectName: input.projectName,
+    deployedAt: new Date().toISOString(),
+  };
+  out.push({
+    file: BUILDER_MANIFEST_FILE,
+    data: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8").toString("base64"),
+    encoding: "base64",
   });
 
   return out;

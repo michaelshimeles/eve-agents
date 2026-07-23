@@ -1,4 +1,6 @@
-import { BuilderWizard } from "@/components/wizard";
+import { Suspense } from "react";
+
+import { BuilderHome } from "@/components/builder-home";
 
 export default function HomePage() {
   return (
@@ -11,7 +13,10 @@ export default function HomePage() {
           </p>
         </div>
       </header>
-      <BuilderWizard />
+      {/* Suspense boundary for useSearchParams (?update=<project> deep links). */}
+      <Suspense fallback={null}>
+        <BuilderHome />
+      </Suspense>
     </main>
   );
 }
