@@ -13,7 +13,6 @@ import {
   getProject,
   latestProductionDeploymentId,
   listDeploymentFiles,
-  listProjectEnvKeys,
   listProjects,
   upsertEnv,
   VercelApiError,
@@ -28,9 +27,9 @@ import {
 // except the version stamps, so keys, VAPID pair, and storage connections
 // all survive. Works with just a Vercel token; the builder stores nothing.
 //
-// Provenance: git-linked projects are rejected (builder deploys never link
-// a repo). Updates require eve-builder.json, or — for agents that predate
-// the manifest — the builder-stamped EVE_ENABLED_FEATURES env key.
+// Provenance: git-linked projects are rejected, and eve-builder.json is
+// required. Path checks / runtime feature env keys alone aren't enough —
+// a non-builder Eve deploy can look the same.
 
 export const maxDuration = 120;
 
@@ -119,37 +118,38 @@ async function readDeployedAgent(
     );
   }
 
-  // Prefer the baked manifest (definitive builder provenance). Without it,
-  // only accept agents that still carry the builder-stamped feature env key —
-  // path checks alone aren't enough, since a git-exported Eve tree can look
-  // identical.
+  // eve-builder.json is the only proven builder stamp in the file tree —
+  // without it we refuse to overwrite the project.
+  const manifestPath = findPath(files, BUILDER_MANIFEST_FILE);
+  if (manifestPath === null) {
+    throw new InspectError(
+      `"${projectName}" has no eve-builder.json manifest, so it wasn't deployed by this builder (or predates update support). Redeploy once from the Create tab to enable updates.`,
+      409,
+    );
+  }
+
   let currentVersion: string | null = null;
   let features: FeatureId[] | null = null;
-  const manifestPath = findPath(files, BUILDER_MANIFEST_FILE);
-  if (manifestPath !== null) {
-    try {
-      const raw = await getDeploymentFile(token, teamId, deploymentId, files.get(manifestPath)!);
-      const parsed = JSON.parse(raw.toString("utf8")) as Partial<BuilderManifest>;
-      if (typeof parsed.templateVersion === "string" && parsed.templateVersion.length > 0) {
-        currentVersion = parsed.templateVersion;
-      }
-      if (Array.isArray(parsed.features)) {
-        features = parsed.features.filter((feature): feature is FeatureId =>
-          FEATURE_IDS.includes(feature as FeatureId),
-        );
-      }
-    } catch {
-      // Unreadable manifest — fall through to the legacy env-key check.
+  try {
+    const raw = await getDeploymentFile(token, teamId, deploymentId, files.get(manifestPath)!);
+    const parsed = JSON.parse(raw.toString("utf8")) as Partial<BuilderManifest>;
+    if (typeof parsed.templateVersion === "string" && parsed.templateVersion.length > 0) {
+      currentVersion = parsed.templateVersion;
     }
-  }
-  if (features === null) {
-    const envKeys = await listProjectEnvKeys(token, teamId, project.id);
-    if (!envKeys.includes("EVE_ENABLED_FEATURES")) {
-      throw new InspectError(
-        `"${projectName}" wasn't deployed by this builder (no eve-builder.json manifest or builder env stamps), so it can't be updated here.`,
-        409,
+    if (Array.isArray(parsed.features)) {
+      features = parsed.features.filter((feature): feature is FeatureId =>
+        FEATURE_IDS.includes(feature as FeatureId),
       );
     }
+  } catch {
+    throw new InspectError(
+      `"${projectName}" has an unreadable eve-builder.json manifest, so it can't be updated safely.`,
+      409,
+    );
+  }
+  if (features === null) {
+    // Manifest present but missing features — infer from the shipped tree as
+    // a last resort for partially written manifests.
     features = FEATURE_IDS.filter((feature) =>
       FEATURE_FILES[feature].some((file) => findPath(files, file) !== null),
     );

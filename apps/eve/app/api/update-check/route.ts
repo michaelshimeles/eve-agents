@@ -61,13 +61,12 @@ export async function GET(request: Request): Promise<Response> {
       ? Number.parseInt(currentReleaseRaw, 10)
       : null;
 
-    // Prefer monotonic release ordering. Agents that predate the release
-    // stamp fall back to content-hash inequality so they still see a banner
-    // once — after one update they carry a release and stay safe.
+    // Only a strictly higher checked-in release counts as an update. Agents
+    // that predate EVE_TEMPLATE_RELEASE get no banner (hash inequality is
+    // unordered and would treat builder rollbacks as upgrades); they can
+    // still be refreshed once via the builder's Update tab or a redeploy.
     const updateAvailable =
-      latest.release !== null && currentRelease !== null
-        ? latest.release > currentRelease
-        : latest.version !== current;
+      latest.release !== null && currentRelease !== null && latest.release > currentRelease;
 
     const projectName = process.env.EVE_PROJECT_NAME ?? "";
     const updateUrl = new URL(
