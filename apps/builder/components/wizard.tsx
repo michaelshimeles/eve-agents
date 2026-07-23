@@ -453,7 +453,9 @@ export function BuilderWizard() {
               url: finalize?.publicUrl ?? body.url ?? "",
               healthy: finalize?.healthy ?? false,
               sessionOk: finalize?.sessionOk ?? false,
-              sessionError: finalize?.sessionError ?? null,
+              // A missing response means verification never ran — surface
+              // that honestly instead of pretending the deployment is fine.
+              sessionError: finalize === null ? "finalize-failed" : (finalize.sessionError ?? null),
               telegramWebhook: finalize?.telegramWebhook ?? null,
             });
             return;
@@ -1229,7 +1231,9 @@ export function BuilderWizard() {
                   <Callout.Description>
                     {phase.sessionOk
                       ? "Health check and a test message both passed — the agent is warmed up and ready."
-                      : phase.sessionError === "protected"
+                      : phase.sessionError === "finalize-failed"
+                        ? "The deploy finished, but the post-deploy verification couldn't run, so the link below may be the deployment-specific URL — that one requires your Vercel login. Find the public production domain on the project page in your Vercel dashboard and try the chat there."
+                        : phase.sessionError === "protected"
                         ? "This project has Vercel Deployment Protection enabled, so the chat requires Vercel SSO — it works for you while logged into Vercel, but not for anyone else. To share it publicly, disable Deployment Protection in the project's settings."
                         : /channel handler/i.test(phase.sessionError ?? "")
                           ? "Starting a conversation failed. If you recently deleted a project with this same name, Vercel serves stale identity tokens for up to ~2 hours — wait, then redeploy from your Vercel dashboard (or rename the project and redeploy). Otherwise check the runtime logs."

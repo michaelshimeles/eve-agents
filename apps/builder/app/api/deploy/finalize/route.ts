@@ -5,11 +5,13 @@ import { getDeploymentStatus, VercelApiError } from "@/lib/vercel-api";
 // works end to end, and, when Telegram is configured, point the bot's
 // webhook at the new deployment.
 //
-// The session test retries for up to ~90s: a brand-new project's first-ever
-// invocation pays a one-time cost (cold function + first workflow-run
-// provisioning) that can exceed a single request timeout, and the retries
-// double as a warm-up so the user's first real chat turn isn't the one
-// paying it.
+// The session test gets a generous single-attempt budget: a brand-new
+// project's first-ever invocation pays a one-time cost (cold function +
+// first workflow-run provisioning), and letting that request run to
+// completion doubles as a warm-up so the user's first real chat turn isn't
+// the one paying it. We never re-send after a timeout — the timed-out
+// invocation usually keeps running remotely (still warming the deployment),
+// and a second POST would overlap it with another session.
 //
 // The target host is never taken from the request: the caller sends their
 // Vercel token + deployment id, and we resolve the hostname through the
@@ -18,7 +20,7 @@ import { getDeploymentStatus, VercelApiError } from "@/lib/vercel-api";
 
 export const maxDuration = 180;
 
-const SESSION_RETRY_BUDGET_MS = 90_000;
+const SESSION_ATTEMPT_TIMEOUT_MS = 70_000;
 const SESSION_RETRY_DELAY_MS = 4_000;
 
 interface FinalizeRequest {
@@ -84,16 +86,18 @@ export async function POST(request: Request): Promise<Response> {
   // A real message-send exercises the workflow runtime (the part that fails
   // when Vercel serves stale identity tokens after a same-name project was
   // deleted and recreated). The turn runs invisibly; no chat thread is made.
+  // At most two attempts, and only when the first one definitively finished
+  // (a response arrived) or never connected — a timeout breaks immediately
+  // so we can't overlap a still-running remote invocation with a second one.
   let sessionOk = false;
   let sessionError: string | null = null;
-  const deadline = Date.now() + SESSION_RETRY_BUDGET_MS;
-  for (;;) {
+  for (let attempt = 0; attempt < 2 && !sessionOk; attempt++) {
     try {
       const session = await fetch(`${base}/eve/v1/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: "Reply with the single word: ok" }),
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(SESSION_ATTEMPT_TIMEOUT_MS),
         redirect: "manual",
       });
       const payload = (await session.json().catch(() => null)) as {
@@ -112,12 +116,18 @@ export async function POST(request: Request): Promise<Response> {
         sessionError = "protected";
         break;
       }
-    } catch {
-      // Timeouts are the expected cold-start shape; keep warming.
-      sessionError = "timeout";
+    } catch (error) {
+      // A timeout means the invocation may still be running (and warming the
+      // deployment); never send a second, overlapping session after one.
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        sessionError = "timeout";
+        break;
+      }
+      sessionError = "unreachable";
     }
-    if (Date.now() + SESSION_RETRY_DELAY_MS >= deadline) break;
-    await new Promise((resolve) => setTimeout(resolve, SESSION_RETRY_DELAY_MS));
+    if (attempt === 0) {
+      await new Promise((resolve) => setTimeout(resolve, SESSION_RETRY_DELAY_MS));
+    }
   }
 
   let telegramWebhook: "set" | "failed" | null = null;
