@@ -95,32 +95,43 @@ async function walk(root: string, dir: string, out: string[]): Promise<void> {
  * only offer an update when latest.release > current.release, so restoring
  * older template files — even with newer filesystem mtimes — can't look like
  * an upgrade. Bump apps/eve/.eve-template-release when shipping changes.
+ *
+ * Only successful results are cached — a transient FS error must not poison
+ * every later deploy/update on this serverless instance.
  */
-let cachedTemplateInfo: Promise<TemplateInfo> | null = null;
+let cachedTemplateInfo: TemplateInfo | null = null;
+let templateInfoInflight: Promise<TemplateInfo> | null = null;
 export function templateInfo(): Promise<TemplateInfo> {
-  cachedTemplateInfo ??= (async () => {
-    const root = await templateRoot();
-    const files: string[] = [];
-    await walk(root, root, files);
-    const hash = createHash("sha256");
-    for (const relative of files.sort()) {
-      hash.update(relative);
-      hash.update("\0");
-      hash.update(await readFile(path.join(root, relative)));
+  if (cachedTemplateInfo !== null) return Promise.resolve(cachedTemplateInfo);
+  templateInfoInflight ??= (async () => {
+    try {
+      const root = await templateRoot();
+      const files: string[] = [];
+      await walk(root, root, files);
+      const hash = createHash("sha256");
+      for (const relative of files.sort()) {
+        hash.update(relative);
+        hash.update("\0");
+        hash.update(await readFile(path.join(root, relative)));
+      }
+      const releaseRaw = (await readFile(path.join(root, TEMPLATE_RELEASE_FILE), "utf8")).trim();
+      const release = Number.parseInt(releaseRaw, 10);
+      if (!Number.isFinite(release) || release < 1) {
+        throw new Error(
+          `${TEMPLATE_RELEASE_FILE} must contain a positive integer (got ${JSON.stringify(releaseRaw)})`,
+        );
+      }
+      const info: TemplateInfo = {
+        version: hash.digest("hex").slice(0, 12),
+        release,
+      };
+      cachedTemplateInfo = info;
+      return info;
+    } finally {
+      templateInfoInflight = null;
     }
-    const releaseRaw = (await readFile(path.join(root, TEMPLATE_RELEASE_FILE), "utf8")).trim();
-    const release = Number.parseInt(releaseRaw, 10);
-    if (!Number.isFinite(release) || release < 1) {
-      throw new Error(
-        `${TEMPLATE_RELEASE_FILE} must contain a positive integer (got ${JSON.stringify(releaseRaw)})`,
-      );
-    }
-    return {
-      version: hash.digest("hex").slice(0, 12),
-      release,
-    };
   })();
-  return cachedTemplateInfo;
+  return templateInfoInflight;
 }
 
 export async function templateVersion(): Promise<string> {

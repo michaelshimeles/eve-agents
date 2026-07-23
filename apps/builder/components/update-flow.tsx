@@ -290,6 +290,17 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
         </header>
 
         <div className="flex flex-col gap-4">
+          {initialProjectName.length > 0 && identity === null && (
+            <Callout.Root color="blue">
+              <Callout.Icon>
+                <Info className="size-4" />
+              </Callout.Icon>
+              <Callout.Title>Updating project “{initialProjectName}”</Callout.Title>
+              <Callout.Description>
+                Paste the Vercel token you deployed with to continue.
+              </Callout.Description>
+            </Callout.Root>
+          )}
           <div className="flex flex-col gap-1.5">
             <Text render={<label htmlFor="update-token" />} size="2" weight="medium">
               Vercel token
@@ -302,6 +313,7 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
               value={token}
               placeholder="vercel_…"
               autoComplete="off"
+              disabled={busy}
               onChange={(event) => {
                 setToken(event.target.value);
                 setIdentity(null);
@@ -319,7 +331,7 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
             <Button
               variant="classic"
               size="3"
-              disabled={token.trim().length === 0 || identifying}
+              disabled={busy || token.trim().length === 0 || identifying}
               onClick={() => void verifyToken()}
             >
               {identifying ? "Checking…" : "Verify token"}
@@ -347,7 +359,9 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
                 size="3"
                 items={scopeItems}
                 value={teamId ?? "personal"}
+                disabled={busy}
                 onValueChange={(value) => {
+                  if (busy) return;
                   const scope = value === "personal" ? null : (value as string);
                   setTeamId(scope);
                   void loadProjects(scope);
@@ -377,55 +391,71 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
             </Callout.Icon>
             <Callout.Title>Couldn&apos;t list your projects</Callout.Title>
             <Callout.Description>
-              {projectsError} — you can still type the project name below.
+              {projectsError} — type the project name below.
             </Callout.Description>
           </Callout.Root>
         )}
 
         {identity !== null && projects !== null && (
-          <div className="flex flex-col gap-1.5">
-            <Text render={<p />} size="2" weight="medium">
-              Agent project
-            </Text>
-            {Object.keys(projectItems).length > 0 ? (
-              <Select.Root
-                size="3"
-                items={projectItems}
-                value={selected}
-                onValueChange={(value) => void selectProject(value as string, teamId)}
-              >
-                <Select.Trigger
-                  className="w-full"
-                  aria-label="Agent project"
-                  placeholder="Pick the project your agent lives in…"
-                />
-                <Select.Content>
-                  {Object.entries(projectItems).map(([value, label]) => (
-                    <Select.Item key={value} value={value}>
-                      {label}
-                    </Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
-            ) : (
+          <div className="flex flex-col gap-3">
+            {Object.keys(projectItems).length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <Text render={<p />} size="2" weight="medium">
+                  Agent project
+                </Text>
+                <Select.Root
+                  size="3"
+                  items={projectItems}
+                  value={selected}
+                  disabled={busy}
+                  onValueChange={(value) => {
+                    if (busy) return;
+                    void selectProject(value as string, teamId);
+                  }}
+                >
+                  <Select.Trigger
+                    className="w-full"
+                    aria-label="Agent project"
+                    placeholder="Pick the project your agent lives in…"
+                  />
+                  <Select.Content>
+                    {Object.entries(projectItems).map(([value, label]) => (
+                      <Select.Item key={value} value={value}>
+                        {label}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+                <Text render={<p />} size="1" color="gray">
+                  Showing your {Object.keys(projectItems).length} most recently updated projects.
+                  If yours isn&apos;t listed, type its name below.
+                </Text>
+              </div>
+            )}
+            <div className="flex flex-col gap-1.5">
+              <Text render={<label htmlFor="manual-project" />} size="2" weight="medium">
+                {Object.keys(projectItems).length > 0 ? "Or type the project name" : "Agent project"}
+              </Text>
               <div className="flex items-center gap-3">
                 <TextField.Input
+                  id="manual-project"
                   size="3"
                   className="flex-1"
                   value={manualName}
                   placeholder="my-eve-agent"
+                  disabled={busy}
                   onChange={(event) => setManualName(event.target.value)}
                 />
                 <Button
                   variant="surface"
                   size="3"
-                  disabled={manualName.trim().length === 0}
+                  disabled={busy || manualName.trim().length === 0}
                   onClick={() => void selectProject(manualName.trim(), teamId)}
                 >
                   Check
                 </Button>
               </div>
-            )}
+            </div>
           </div>
         )}
 

@@ -57,6 +57,8 @@ interface DeployedAgent {
   files: Map<string, string>;
   /** Null for deployments that predate versioning. */
   currentVersion: string | null;
+  /** Null when the manifest has no release yet. */
+  currentRelease: number | null;
   features: FeatureId[];
   instructionsPath: string;
   customSchedulePaths: string[];
@@ -129,12 +131,16 @@ async function readDeployedAgent(
   }
 
   let currentVersion: string | null = null;
+  let currentRelease: number | null = null;
   let features: FeatureId[] | null = null;
   try {
     const raw = await getDeploymentFile(token, teamId, deploymentId, files.get(manifestPath)!);
     const parsed = JSON.parse(raw.toString("utf8")) as Partial<BuilderManifest>;
     if (typeof parsed.templateVersion === "string" && parsed.templateVersion.length > 0) {
       currentVersion = parsed.templateVersion;
+    }
+    if (typeof parsed.templateRelease === "number" && Number.isFinite(parsed.templateRelease)) {
+      currentRelease = parsed.templateRelease;
     }
     if (Array.isArray(parsed.features)) {
       features = parsed.features.filter((feature): feature is FeatureId =>
@@ -165,6 +171,7 @@ async function readDeployedAgent(
     deploymentId,
     files,
     currentVersion,
+    currentRelease,
     features,
     instructionsPath,
     customSchedulePaths,
@@ -241,16 +248,36 @@ export async function POST(request: Request): Promise<Response> {
     });
     files.push(...carried);
 
-    // Only the stamps change; every other env var (keys, VAPID pair,
-    // storage-injected values) stays exactly as it is.
+    // Stamp before createDeployment so the new build sees the new release.
+    // If the deploy call fails, roll the stamps back so the manage-page
+    // banner keeps offering the update against the still-live old code.
+    const builderUrl = new URL(request.url).origin;
     await upsertEnv(token, teamId, agent.projectId, [
       { key: "EVE_TEMPLATE_VERSION", value: latest.version },
       { key: "EVE_TEMPLATE_RELEASE", value: String(latest.release) },
       { key: "EVE_PROJECT_NAME", value: agent.projectName },
-      { key: "EVE_BUILDER_URL", value: new URL(request.url).origin },
+      { key: "EVE_BUILDER_URL", value: builderUrl },
     ]);
-
-    const deployment = await createDeployment(token, teamId, agent.projectName, files);
+    let deployment;
+    try {
+      deployment = await createDeployment(token, teamId, agent.projectName, files);
+    } catch (error) {
+      const rollback = [
+        ...(agent.currentVersion !== null
+          ? [{ key: "EVE_TEMPLATE_VERSION", value: agent.currentVersion }]
+          : []),
+        {
+          key: "EVE_TEMPLATE_RELEASE",
+          // "0" is never offered as current (update check needs release >= 1),
+          // so a first-time stamp that failed to deploy won't suppress retries.
+          value: String(agent.currentRelease ?? 0),
+        },
+      ];
+      await upsertEnv(token, teamId, agent.projectId, rollback).catch((rollbackError) => {
+        console.error("failed to roll back template stamps after deploy failure:", rollbackError);
+      });
+      throw error;
+    }
     return Response.json({
       projectId: agent.projectId,
       projectName: agent.projectName,
