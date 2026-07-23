@@ -36,8 +36,28 @@ export const maxDuration = 120;
 interface UpdateRequest {
   token?: unknown;
   teamId?: unknown;
-  action?: unknown; // "projects" | "inspect" | "update"
+  action?: unknown; // "projects" | "inspect" | "update" | "rollback-stamps"
   projectName?: unknown;
+  /** Prior stamps for rollback-stamps (null/omitted → release "0"). */
+  previousVersion?: unknown;
+  previousRelease?: unknown;
+}
+
+function stampRollbackEnv(
+  previousVersion: string | null,
+  previousRelease: number | null,
+): { key: string; value: string }[] {
+  return [
+    ...(previousVersion !== null
+      ? [{ key: "EVE_TEMPLATE_VERSION", value: previousVersion }]
+      : []),
+    {
+      key: "EVE_TEMPLATE_RELEASE",
+      // "0" is never offered as current (update check needs release >= 1),
+      // so a first-time stamp that failed to deploy won't suppress retries.
+      value: String(previousRelease ?? 0),
+    },
+  ];
 }
 
 /** Exact path match, else any depth-tolerant suffix match. */
@@ -198,7 +218,36 @@ export async function POST(request: Request): Promise<Response> {
     if (typeof body.projectName !== "string" || body.projectName.trim().length === 0) {
       return Response.json({ error: "Missing project name" }, { status: 400 });
     }
-    const agent = await readDeployedAgent(token, teamId, body.projectName.trim());
+    const projectName = body.projectName.trim();
+
+    // Restore prior stamps after an accepted deploy whose build later failed.
+    // Does not re-read the deployment tree — the client passes the stamps from
+    // the update response (which reflected the still-live agent at start time).
+    if (action === "rollback-stamps") {
+      const project = await getProject(token, teamId, projectName);
+      if (project === null) {
+        return Response.json({ error: `No project named "${projectName}".` }, { status: 404 });
+      }
+      const previousVersion =
+        typeof body.previousVersion === "string" && body.previousVersion.length > 0
+          ? body.previousVersion
+          : null;
+      const previousRelease =
+        typeof body.previousRelease === "number" && Number.isFinite(body.previousRelease)
+          ? body.previousRelease
+          : typeof body.previousRelease === "string" && /^\d+$/.test(body.previousRelease)
+            ? Number.parseInt(body.previousRelease, 10)
+            : null;
+      await upsertEnv(
+        token,
+        teamId,
+        project.id,
+        stampRollbackEnv(previousVersion, previousRelease),
+      );
+      return Response.json({ ok: true });
+    }
+
+    const agent = await readDeployedAgent(token, teamId, projectName);
 
     if (action === "inspect") {
       return Response.json({
@@ -249,8 +298,8 @@ export async function POST(request: Request): Promise<Response> {
     files.push(...carried);
 
     // Stamp before createDeployment so the new build sees the new release.
-    // If the deploy call fails, roll the stamps back so the manage-page
-    // banner keeps offering the update against the still-live old code.
+    // If createDeployment throws, roll stamps back here. If Vercel accepts
+    // the deploy and the build later fails, the client calls rollback-stamps.
     const builderUrl = new URL(request.url).origin;
     await upsertEnv(token, teamId, agent.projectId, [
       { key: "EVE_TEMPLATE_VERSION", value: latest.version },
@@ -262,20 +311,23 @@ export async function POST(request: Request): Promise<Response> {
     try {
       deployment = await createDeployment(token, teamId, agent.projectName, files);
     } catch (error) {
-      const rollback = [
-        ...(agent.currentVersion !== null
-          ? [{ key: "EVE_TEMPLATE_VERSION", value: agent.currentVersion }]
-          : []),
-        {
-          key: "EVE_TEMPLATE_RELEASE",
-          // "0" is never offered as current (update check needs release >= 1),
-          // so a first-time stamp that failed to deploy won't suppress retries.
-          value: String(agent.currentRelease ?? 0),
-        },
-      ];
-      await upsertEnv(token, teamId, agent.projectId, rollback).catch((rollbackError) => {
+      const deployMessage = error instanceof Error ? error.message : "Deployment failed";
+      try {
+        await upsertEnv(
+          token,
+          teamId,
+          agent.projectId,
+          stampRollbackEnv(agent.currentVersion, agent.currentRelease),
+        );
+      } catch (rollbackError) {
+        const rollbackMessage =
+          rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         console.error("failed to roll back template stamps after deploy failure:", rollbackError);
-      });
+        throw new InspectError(
+          `${deployMessage} Also failed to restore the previous template stamps (${rollbackMessage}). The agent may stop offering this update until stamps are fixed — retry the update or set EVE_TEMPLATE_RELEASE back to ${agent.currentRelease ?? 0}.`,
+          502,
+        );
+      }
       throw error;
     }
     return Response.json({
@@ -286,7 +338,9 @@ export async function POST(request: Request): Promise<Response> {
       inspectorUrl: deployment.inspectorUrl,
       readyState: deployment.readyState,
       fromVersion: agent.currentVersion,
+      fromRelease: agent.currentRelease,
       toVersion: latest.version,
+      toRelease: latest.release,
     });
   } catch (error) {
     if (error instanceof InspectError) {

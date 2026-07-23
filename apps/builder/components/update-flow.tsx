@@ -58,6 +58,39 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
   const [phase, setPhase] = useState<UpdatePhase>({ kind: "idle" });
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefillConsumed = useRef(false);
+  /** Stamps from the live agent at update start — used if the build fails. */
+  const priorStamps = useRef<{ version: string | null; release: number | null } | null>(null);
+
+  async function rollbackStampsAfterFailedBuild(): Promise<string | null> {
+    const prior = priorStamps.current;
+    if (prior === null || selected.length === 0) return null;
+    try {
+      const response = await fetch("/api/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: token.trim(),
+          teamId,
+          action: "rollback-stamps",
+          projectName: selected,
+          previousVersion: prior.version,
+          previousRelease: prior.release,
+        }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        return (
+          body.error ??
+          "Could not restore the previous template stamps. The agent may stop offering this update until you retry."
+        );
+      }
+      return null;
+    } catch (error) {
+      return error instanceof Error
+        ? error.message
+        : "Could not restore the previous template stamps after the failed build.";
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -170,6 +203,7 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
           };
           if (!response.ok) throw new Error(body.error ?? "Status check failed");
           if (body.readyState === "READY") {
+            priorStamps.current = null;
             setPhase({ kind: "finalizing" });
             const finalize = (await fetch("/api/deploy/finalize", {
               method: "POST",
@@ -193,9 +227,13 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
             return;
           }
           if (body.readyState === "ERROR" || body.readyState === "CANCELED") {
+            const rollbackError = await rollbackStampsAfterFailedBuild();
             setPhase({
               kind: "error",
-              message: "The remote build failed. Your agent keeps running on its previous deployment.",
+              message:
+                rollbackError === null
+                  ? "The remote build failed. Your agent keeps running on its previous deployment."
+                  : `The remote build failed, and restoring the previous template stamps also failed: ${rollbackError}`,
               log: body.errorLog ?? null,
             });
             return;
@@ -206,6 +244,8 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
           // Cap retries so a revoked token / deleted deployment / network
           // outage surfaces an error instead of polling forever.
           if (consecutiveFailures >= 5) {
+            // Don't roll stamps back here — the build may still succeed; only
+            // ERROR/CANCELED means the new stamps must be reverted.
             setPhase({
               kind: "error",
               message:
@@ -225,6 +265,7 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
   async function runUpdate() {
     if (selected.length === 0) return;
     setPhase({ kind: "starting" });
+    priorStamps.current = null;
     try {
       const response = await fetch("/api/update", {
         method: "POST",
@@ -239,12 +280,18 @@ export function UpdateFlow({ initialProjectName }: { initialProjectName: string 
       const body = (await response.json()) as {
         deploymentId?: string;
         inspectorUrl?: string | null;
+        fromVersion?: string | null;
+        fromRelease?: number | null;
         error?: string;
       };
       if (!response.ok || body.deploymentId === undefined) {
         setPhase({ kind: "error", message: body.error ?? "Update failed", log: null });
         return;
       }
+      priorStamps.current = {
+        version: body.fromVersion ?? null,
+        release: typeof body.fromRelease === "number" ? body.fromRelease : null,
+      };
       setPhase({
         kind: "building",
         deploymentId: body.deploymentId,
