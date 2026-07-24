@@ -2,7 +2,8 @@
 // arrive as web push events even when the app is closed.
 
 self.addEventListener("push", (event) => {
-  let payload = { title: "Eve", body: "" };
+  // Generic fallback only: real pushes carry the agent's name in the payload.
+  let payload = { title: "Assistant", body: "" };
   try {
     payload = { ...payload, ...event.data.json() };
   } catch {

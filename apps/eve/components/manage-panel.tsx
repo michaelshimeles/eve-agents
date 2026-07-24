@@ -1,7 +1,6 @@
 "use client";
 
-import { Badge, DropdownMenu, Tabs, TextArea, TextField } from "frosted-ui";
-import { Button, LinkButton, Loader } from "@/components/ui/compat";
+import { Badge, Button, DropdownMenu, Input, InputArea, Loader, Tabs } from "@cloudflare/kumo";
 import {
   ArrowSquareOutIcon,
   CaretDownIcon,
@@ -15,9 +14,10 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
+import { AGENT_NAME } from "@/lib/identity";
 import { cn } from "@/lib/utils";
 
-// Management surface for everything Eve does or knows on her own: scheduled
+// Management surface for everything Ruth does or knows on her own: scheduled
 // reminders, event-trigger webhooks, long-term memory, connected apps, and
 // saved skills. Reminders/webhooks/memory stay read + delete (creation is
 // conversational); connections can be added/removed here because that's an
@@ -74,13 +74,6 @@ interface SkillItem {
   description: string;
   markdown: string;
   updatedAt: string;
-}
-
-interface UpdateInfo {
-  updateAvailable: boolean;
-  currentVersion?: string;
-  latestVersion?: string;
-  updateUrl?: string;
 }
 
 function formatWhen(iso: string | null): string {
@@ -153,7 +146,7 @@ function CopyUrlButton({ url }: { url: string }) {
 }
 
 function EmptyNote({ children }: { children: React.ReactNode }) {
-  return <p className="py-8 text-center text-sm text-gray-11">{children}</p>;
+  return <p className="py-8 text-center text-sm text-kumo-subtle">{children}</p>;
 }
 
 function LoadingRow() {
@@ -173,7 +166,7 @@ function RunHistory({
   onOpenThread: (threadId: string) => void;
 }) {
   if (runs.length === 0) {
-    return <p className="pb-2 ps-6 text-xs text-gray-11">No runs recorded yet.</p>;
+    return <p className="pb-2 ps-6 text-xs text-kumo-subtle">No runs recorded yet.</p>;
   }
   return (
     <ul className="mb-2 flex flex-col gap-1 ps-6">
@@ -182,20 +175,20 @@ function RunHistory({
           <span
             className={cn(
               "size-1.5 shrink-0 rounded-full",
-              run.status === "ok" ? "bg-success-11" : "bg-danger-9",
+              run.status === "ok" ? "bg-kumo-success" : "bg-kumo-danger",
             )}
             aria-hidden
           />
-          <span className="text-gray-11">{formatWhen(run.firedAt)}</span>
+          <span className="text-kumo-subtle">{formatWhen(run.firedAt)}</span>
           {run.status === "error" && (
-            <span className="truncate text-danger-11" title={run.error ?? undefined}>
+            <span className="truncate text-kumo-danger" title={run.error ?? undefined}>
               {run.error ?? "failed"}
             </span>
           )}
           {run.threadId !== null && (
             <button
               type="button"
-              className="flex items-center gap-1 text-accent-11 hover:underline"
+              className="flex items-center gap-1 text-kumo-interact hover:underline"
               onClick={() => onOpenThread(run.threadId!)}
             >
               Open thread
@@ -233,7 +226,7 @@ function ExpandCaret({ expanded, onToggle, label }: { expanded: boolean; onToggl
 function ToolkitLogo({ toolkit }: { toolkit: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
-    return <PlugsIcon className="size-4 shrink-0 text-gray-11" aria-hidden />;
+    return <PlugsIcon className="size-4 shrink-0 text-kumo-subtle" aria-hidden />;
   }
   return (
     <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white p-[3px]">
@@ -320,7 +313,7 @@ function ConnectionsTab() {
         <EmptyNote>Couldn&rsquo;t reach Composio. Check COMPOSIO_API_KEY and retry.</EmptyNote>
       )}
       {!failed && connections.length === 0 && (
-        <EmptyNote>No connected apps yet. Connect one below or ask Eve in chat.</EmptyNote>
+        <EmptyNote>No connected apps yet. Connect one below or ask {AGENT_NAME} in chat.</EmptyNote>
       )}
       {connections.filter((entry) => entry.accounts.length > 0).length > 0 && (
         <ul className="flex flex-col">
@@ -329,7 +322,7 @@ function ConnectionsTab() {
             .map((entry) => (
               <li
                 key={entry.toolkit}
-                className="border-b border-gray-a4 py-2.5 last:border-b-0"
+                className="border-b border-kumo-hairline py-2.5 last:border-b-0"
               >
                 <div className="flex items-center gap-2">
                   <ToolkitLogo toolkit={entry.toolkit} />
@@ -338,10 +331,10 @@ function ConnectionsTab() {
                 <ul className="mt-1 flex flex-col gap-1">
                   {entry.accounts.map((account) => (
                     <li key={account.id} className="flex items-center gap-2 ps-6">
-                      <span className="min-w-0 flex-1 truncate text-xs text-gray-11">
+                      <span className="min-w-0 flex-1 truncate text-xs text-kumo-subtle">
                         {account.alias ?? account.label ?? account.id}
                       </span>
-                      <Badge variant="soft" color={account.status === "active" ? "green" : "gray"}>
+                      <Badge variant={account.status === "active" ? "success" : "secondary"}>
                         {account.status}
                       </Badge>
                       <DeleteButton
@@ -357,14 +350,16 @@ function ConnectionsTab() {
       )}
       {!failed && available.length > 0 && (
         <div className="pt-1">
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger>
-              <Button variant="secondary" size="sm" disabled={pendingToolkit !== null}>
-                <PlusIcon className="size-3.5" aria-hidden />
-                {pendingToolkit !== null ? "Opening…" : "Connect an app"}
-                <CaretDownIcon className="size-3 text-gray-11" aria-hidden />
-              </Button>
-            </DropdownMenu.Trigger>
+          <DropdownMenu>
+            <DropdownMenu.Trigger
+              render={
+                <Button variant="secondary" size="sm" disabled={pendingToolkit !== null}>
+                  <PlusIcon className="size-3.5" aria-hidden />
+                  {pendingToolkit !== null ? "Opening…" : "Connect an app"}
+                  <CaretDownIcon className="size-3 text-kumo-subtle" aria-hidden />
+                </Button>
+              }
+            />
             <DropdownMenu.Content align="start">
               {available.map((toolkit) => (
                 <DropdownMenu.Item key={toolkit} onClick={() => connect(toolkit)}>
@@ -375,12 +370,13 @@ function ConnectionsTab() {
                 </DropdownMenu.Item>
               ))}
             </DropdownMenu.Content>
-          </DropdownMenu.Root>
+          </DropdownMenu>
         </div>
       )}
       {!failed && (
-        <p className="text-xs text-gray-11">
-          Other apps can be connected by asking Eve in chat — this list covers the common ones.
+        <p className="text-xs text-kumo-subtle">
+          Other apps can be connected by asking {AGENT_NAME} in chat — this list covers the common
+          ones.
         </p>
       )}
     </div>
@@ -444,7 +440,8 @@ function SkillsTab() {
   if (skills.length === 0) {
     return (
       <EmptyNote>
-        No saved skills. Describe a repeatable workflow in chat and ask Eve to save it as a skill.
+          No saved skills. Describe a repeatable workflow in chat and ask {AGENT_NAME} to save it
+          as a skill.
       </EmptyNote>
     );
   }
@@ -455,7 +452,7 @@ function SkillsTab() {
         const isExpanded = expanded === skill.name;
         const isEditing = editing === skill.name;
         return (
-          <li key={skill.name} className="border-b border-gray-a4 py-2 last:border-b-0">
+          <li key={skill.name} className="border-b border-kumo-hairline py-2 last:border-b-0">
             <div className="flex items-center gap-1">
               <ExpandCaret
                 expanded={isExpanded}
@@ -467,7 +464,7 @@ function SkillsTab() {
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-mono text-sm">/{skill.name}</p>
-                <p className="truncate text-xs text-gray-11" title={skill.description}>
+                <p className="truncate text-xs text-kumo-subtle" title={skill.description}>
                   {skill.description}
                 </p>
               </div>
@@ -486,23 +483,26 @@ function SkillsTab() {
               />
             </div>
             {isExpanded && !isEditing && (
-              <pre className="mt-2 max-h-64 overflow-y-auto rounded-md bg-gray-a2 p-3 text-xs whitespace-pre-wrap text-gray-11 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <pre className="mt-2 max-h-64 overflow-y-auto rounded-md bg-kumo-recessed p-3 text-xs whitespace-pre-wrap text-kumo-subtle [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {skill.markdown}
               </pre>
             )}
             {isExpanded && isEditing && (
               <div className="mt-2 flex flex-col gap-2">
-                <TextField.Input
-                  size="2"
+                <Input
+                  size="sm"
                   value={draftDescription}
                   aria-label="Skill description"
-                  placeholder="When should Eve use this skill?"
+                  placeholder={`When should ${AGENT_NAME} use this skill?`}
                   onChange={(event) => setDraftDescription(event.target.value)}
                 />
-                <TextArea
+                <InputArea
                   value={draftMarkdown}
                   aria-label="Skill instructions"
-                  className="[&>textarea]:field-sizing-content [&>textarea]:min-h-32 [&>textarea]:max-h-80 [&>textarea]:font-mono [&>textarea]:text-xs"
+                  autoResize
+                  minRows={6}
+                  maxRows={14}
+                  className="font-mono text-xs"
                   onChange={(event) => setDraftMarkdown(event.target.value)}
                 />
                 <div className="flex justify-end gap-2">
@@ -543,6 +543,13 @@ const ALL_FEATURES_ON: FeatureFlags = {
   skills: true,
 };
 
+interface UpdateInfo {
+  updateAvailable: boolean;
+  currentVersion?: string;
+  latestVersion?: string;
+  updateUrl?: string;
+}
+
 export function ManagePanel({
   onOpenThread,
 }: {
@@ -551,6 +558,7 @@ export function ManagePanel({
 }) {
   const [tab, setTab] = useState("reminders");
   const [features, setFeatures] = useState<FeatureFlags>(ALL_FEATURES_ON);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [reminders, setReminders] = useState<ReminderItem[] | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookItem[] | null>(null);
   const [runs, setRuns] = useState<RunItem[]>([]);
@@ -564,12 +572,8 @@ export function ManagePanel({
         if (body !== null) setFeatures({ ...ALL_FEATURES_ON, ...body });
       })
       .catch(() => undefined);
-  }, []);
-
-  // Builder-deployed agents know which template version they run; ask the
-  // builder whether a newer one exists. The personal app reports "no update".
-  const [update, setUpdate] = useState<UpdateInfo | null>(null);
-  useEffect(() => {
+    // Builder-deployed agents carry a baked template stamp; ask the builder
+    // whether a newer template exists. The personal app reports "no update".
     void fetch("/api/update-check")
       .then((response) => (response.ok ? response.json() : null))
       .then((body: UpdateInfo | null) => setUpdate(body))
@@ -660,43 +664,39 @@ export function ManagePanel({
   return (
     <div>
       {update?.updateAvailable === true && update.updateUrl !== undefined && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent-a6 bg-accent-a2 px-4 py-3">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-kumo-hairline bg-kumo-tint px-4 py-3">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-gray-12">
-              A newer version of this agent is available
-            </p>
-            <p className="mt-0.5 text-xs text-gray-11">
+            <p className="text-sm font-medium">A newer version of this agent is available</p>
+            <p className="mt-0.5 text-xs text-kumo-subtle">
               Updating takes a few minutes and keeps your chats, memories, connections, skills,
               and settings.
               {update.currentVersion !== undefined && update.latestVersion !== undefined && (
                 <span className="ms-1 font-mono">
-                  {update.currentVersion} → {update.latestVersion}
+                  {update.currentVersion} &rarr; {update.latestVersion}
                 </span>
               )}
             </p>
           </div>
-          <LinkButton
-            variant="primary"
-            size="sm"
-            external
+          <a
             href={update.updateUrl}
             target="_blank"
+            rel="noreferrer"
+            className="flex shrink-0 items-center gap-1 text-sm font-medium text-kumo-interact hover:underline"
           >
             Update
             <ArrowSquareOutIcon className="size-3.5" />
-          </LinkButton>
+          </a>
         </div>
       )}
-      <Tabs.Root value={tab} onValueChange={(value) => setTab(value as string)}>
-        {/* Hug the tab labels instead of stretching across the page column. */}
-        <Tabs.List size="1" className="w-fit max-w-full">
-          {visibleTabs.map((entry) => (
-            <Tabs.Trigger key={entry.value} value={entry.value}>
-              {entry.label}
-            </Tabs.Trigger>
-          ))}
-        </Tabs.List>
-      </Tabs.Root>
+      <Tabs
+        size="sm"
+        // Hug the tab labels like the Kumo docs demo instead of stretching
+        // the segmented track across the whole page column.
+        className="w-fit max-w-full"
+        value={tab}
+        onValueChange={setTab}
+        tabs={visibleTabs}
+      />
 
       <div className="mt-3 min-h-40">
         {tab === "reminders" &&
@@ -714,7 +714,7 @@ export function ManagePanel({
                 return (
                   <li
                     key={reminder.id}
-                    className="border-b border-gray-a4 py-2 last:border-b-0"
+                    className="border-b border-kumo-hairline py-2 last:border-b-0"
                   >
                     <div className="flex items-center gap-2">
                       <ExpandCaret
@@ -728,13 +728,13 @@ export function ManagePanel({
                         <p className="truncate text-sm" title={reminder.prompt}>
                           {reminder.prompt}
                         </p>
-                        <p className="mt-0.5 text-xs text-gray-11">
+                        <p className="mt-0.5 text-xs text-kumo-subtle">
                           Next: {formatWhen(reminder.nextFireAt)}
                           {reminder.cron !== null && ` · ${reminder.cron} (${reminder.timezone})`}
                           {history.length > 0 && ` · ran ${history.length}×`}
                         </p>
                       </div>
-                      <Badge variant="soft" color="gray">
+                      <Badge variant="secondary">
                         {reminder.cron === null ? "one-off" : "recurring"}
                       </Badge>
                       <DeleteButton
@@ -754,7 +754,8 @@ export function ManagePanel({
             <LoadingRow />
           ) : webhooks.length === 0 ? (
             <EmptyNote>
-              No event triggers. Ask Eve to &ldquo;create a webhook for deploy alerts&rdquo;.
+              No event triggers. Ask {AGENT_NAME} to &ldquo;create a webhook for deploy
+              alerts&rdquo;.
             </EmptyNote>
           ) : (
             <ul className="flex flex-col">
@@ -762,7 +763,7 @@ export function ManagePanel({
                 const history = runsFor("webhook", hook.id);
                 const expanded = expandedRuns === `webhook:${hook.id}`;
                 return (
-                  <li key={hook.id} className="border-b border-gray-a4 py-2 last:border-b-0">
+                  <li key={hook.id} className="border-b border-kumo-hairline py-2 last:border-b-0">
                     <div className="flex items-center gap-2">
                       <ExpandCaret
                         expanded={expanded}
@@ -771,10 +772,10 @@ export function ManagePanel({
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{hook.name}</p>
-                        <p className="mt-0.5 truncate text-xs text-gray-11" title={hook.prompt}>
+                        <p className="mt-0.5 truncate text-xs text-kumo-subtle" title={hook.prompt}>
                           {hook.prompt}
                         </p>
-                        <p className="mt-0.5 text-xs text-gray-11">
+                        <p className="mt-0.5 text-xs text-kumo-subtle">
                           Fired {hook.fireCount} {hook.fireCount === 1 ? "time" : "times"} · last{" "}
                           {formatWhen(hook.lastFiredAt)}
                         </p>
@@ -802,15 +803,15 @@ export function ManagePanel({
               {memories.map((memory) => (
                 <li
                   key={memory.id}
-                  className="flex items-center gap-3 border-b border-gray-a4 py-2.5 last:border-b-0"
+                  className="flex items-center gap-3 border-b border-kumo-hairline py-2.5 last:border-b-0"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm break-words">{memory.content}</p>
-                    <p className="mt-0.5 text-xs text-gray-11">
+                    <p className="mt-0.5 text-xs text-kumo-subtle">
                       Updated {formatWhen(memory.updatedAt)}
                     </p>
                   </div>
-                  {memory.permanent && <Badge variant="soft" color="gray">permanent</Badge>}
+                  {memory.permanent && <Badge variant="secondary">permanent</Badge>}
                   <DeleteButton label="Forget memory" onDelete={() => forgetMemory(memory.id)} />
                 </li>
               ))}

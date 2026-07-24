@@ -1,5 +1,10 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
 import { skillStore } from "../lib/skill-store";
+import { withTimeout } from "../lib/with-timeout";
+
+// Same first-reply guard as the memory profile: a cold cache blocks the
+// session's first model call on the Blob fetch, so cap the wait.
+const SKILLS_TIMEOUT_MS = 2000;
 
 // Inlines every chat-created skill (saved via the create_skill tool) into the
 // session's instructions. Serving them as real eve skills would materialize
@@ -12,7 +17,7 @@ export default defineDynamic({
     "session.started": async () => {
       let skills;
       try {
-        skills = await skillStore.list();
+        skills = await withTimeout(skillStore.list(), SKILLS_TIMEOUT_MS, "Skill list");
       } catch {
         return null;
       }

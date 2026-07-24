@@ -31,7 +31,7 @@ function CodeBlock({ children, ...props }: ComponentProps<"pre">) {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const previewable = codeLanguage(children) === "html";
   const actionClass =
-    "not-typeset rounded-md bg-panel/80 p-1.5 text-gray-11 ring ring-gray-a4 opacity-0 backdrop-blur-sm transition-opacity hover:text-gray-12 focus-visible:opacity-100 group-hover/code:opacity-100";
+    "not-typeset rounded-md bg-kumo-base/80 p-1.5 text-kumo-subtle ring ring-kumo-hairline opacity-0 backdrop-blur-sm transition-opacity hover:text-kumo-default focus-visible:opacity-100 group-hover/code:opacity-100";
 
   return (
     <div className="group/code relative">
@@ -52,7 +52,7 @@ function CodeBlock({ children, ...props }: ComponentProps<"pre">) {
           title="HTML preview"
           sandbox="allow-scripts"
           srcDoc={previewHtml}
-          className="not-typeset h-96 w-full rounded-lg bg-white ring ring-gray-a4"
+          className="not-typeset h-96 w-full rounded-lg bg-white ring ring-kumo-hairline"
         />
       )}
       <div className="absolute end-2 top-2 flex gap-1">

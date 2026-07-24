@@ -2,6 +2,7 @@ import { Client, type HandleMessageStreamEvent } from "eve/client";
 
 import { sendPushToAll } from "../../lib/push-db";
 import { upsertThread } from "../../lib/threads-db";
+import { agentName } from "./owner";
 
 // Delivers proactive work (fired reminders, webhook events) into the web chat
 // UI. The chat UI renders threads from persisted eve stream events (SavedChat
@@ -56,7 +57,7 @@ export async function deliverToWebChatThread(
   // must not fail the delivery — callers would retry the whole run and create
   // a duplicate thread (and webhook history would lose the thread link).
   try {
-    await sendPushToAll({ title: "Eve", body: pushBody(events) ?? clipTitle(title) });
+    await sendPushToAll({ title: agentName(), body: pushBody(events) ?? clipTitle(title) });
   } catch (error) {
     console.error("Proactive push notification failed:", error);
   }

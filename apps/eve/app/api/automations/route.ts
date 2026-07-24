@@ -3,7 +3,7 @@ import { listRecentRuns } from "@/agent/lib/runs-db";
 import { deleteWebhook, listWebhooks, webhookUrl } from "@/agent/lib/webhooks-db";
 import { requireWebAuth } from "@/lib/web-auth";
 
-// Management surface for the web UI: what Eve has scheduled (reminders), what
+// Management surface for the web UI: what Ruth has scheduled (reminders), what
 // can wake her (webhooks), and what happened when they fired (runs), with
 // delete. Mirrors the chat tools (list_reminders, cancel_reminder,
 // list_webhooks, delete_webhook) so the panel and the agent always agree.

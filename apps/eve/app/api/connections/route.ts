@@ -3,7 +3,7 @@ import { requireWebAuth } from "@/lib/web-auth";
 
 // Connections manager: which Composio apps are linked, plus connect (returns
 // an OAuth link to open) and disconnect. Uses the same Composio Connect MCP
-// the agent uses, so the panel reflects exactly what Eve can reach.
+// the agent uses, so the panel reflects exactly what Ruth can reach.
 
 interface ToolkitResult {
   toolkit?: string;

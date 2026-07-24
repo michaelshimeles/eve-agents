@@ -1,6 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
+import { agentName, ownerName } from "../lib/owner";
 import {
   DEFAULT_TIMEZONE,
   createReminder,
@@ -13,15 +14,14 @@ function telegramChatId(attributes: Record<string, unknown>): string | null {
 }
 
 export default defineTool({
-  description:
-    "Schedule a proactive reminder or task. Eve wakes up at the given time (one-off) or on the cron cadence (recurring), performs the prompt, and messages Micky on Telegram. Use for 'remind me to X at 9pm', 'every weekday morning send me my schedule', or any future/recurring task.",
+  description: `Schedule a proactive reminder or task. ${agentName()} wakes up at the given time (one-off) or on the cron cadence (recurring), performs the prompt, and messages ${ownerName()} on Telegram. Use for 'remind me to X at 9pm', 'every weekday morning send me my schedule', or any future/recurring task.`,
   inputSchema: z.object({
     prompt: z
       .string()
       .min(1)
       .max(4000)
       .describe(
-        "Instruction to your future self when this fires: what to do or check, and what to send Micky. Include any context needed - the fired session has no chat history.",
+        `Instruction to your future self when this fires: what to do or check, and what to send ${ownerName()}. Include any context needed - the fired session has no chat history.`,
       ),
     fireAt: z
       .string()

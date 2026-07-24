@@ -1,12 +1,25 @@
-import { Theme } from "frosted-ui";
 import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono, Inter } from "next/font/google";
 import type { ReactNode } from "react";
-
+import { AGENT_NAME } from "@/lib/identity";
+import { cn } from "@/lib/utils";
 import "./globals.css";
 
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
+
+const geist = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist",
+});
+
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
+});
+
 export const metadata: Metadata = {
-  title: "Eve",
-  description: "Chat with your personal Eve agent",
+  title: AGENT_NAME,
+  description: `Chat with your personal ${AGENT_NAME} agent`,
 };
 
 export const viewport: Viewport = {
@@ -15,13 +28,12 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className="antialiased">
-        {/* Whop-style frosted dark theme with the classic blue accent. */}
-        <Theme appearance="dark" accentColor="blue" className="min-h-dvh bg-canvas text-gray-12">
-          {children}
-        </Theme>
-      </body>
+    <html
+      lang="en"
+      data-mode="dark"
+      className={cn("font-sans", inter.variable, geist.variable, geistMono.variable)}
+    >
+      <body className="antialiased">{children}</body>
     </html>
   );
 }

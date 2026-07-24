@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader } from "@/components/ui/compat";
+import { Loader } from "@cloudflare/kumo";
 import {
   BellIcon,
   BellSlashIcon,
@@ -209,16 +209,16 @@ export function CommandPalette({
       <div
         role="dialog"
         aria-label="Command palette"
-        className="flex max-h-[55vh] w-[36rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-panel shadow-xl ring ring-gray-a6"
+        className="flex max-h-[55vh] w-[36rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-kumo-base shadow-xl ring ring-kumo-line"
       >
-        <div className="flex items-center gap-2 border-b border-gray-a4 px-4 py-3">
-          <MagnifyingGlassIcon className="size-4 shrink-0 text-gray-11" />
+        <div className="flex items-center gap-2 border-b border-kumo-hairline px-4 py-3">
+          <MagnifyingGlassIcon className="size-4 shrink-0 text-kumo-subtle" />
           <input
             ref={inputRef}
             value={query}
             placeholder="Search threads and messages..."
             aria-label="Search threads and messages"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-gray-a9"
+            className="w-full bg-transparent text-sm outline-none placeholder:text-kumo-placeholder"
             onChange={(event) => {
               setQuery(event.target.value);
               setActiveIndex(0);
@@ -243,7 +243,7 @@ export function CommandPalette({
         </div>
         <div className="overflow-y-auto p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {entries.length === 0 && (
-            <p className="px-3 py-6 text-center text-sm text-gray-11">No matches.</p>
+            <p className="px-3 py-6 text-center text-sm text-kumo-subtle">No matches.</p>
           )}
           {entries.map((entry, index) => {
             const header = entry.kind !== lastKind ? sectionLabel[entry.kind] : null;
@@ -251,7 +251,7 @@ export function CommandPalette({
             return (
               <div key={entry.key}>
                 {header && (
-                  <p className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-gray-11">
+                  <p className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-kumo-subtle">
                     {header}
                   </p>
                 )}
@@ -259,16 +259,16 @@ export function CommandPalette({
                   type="button"
                   className={cn(
                     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-start",
-                    index === active && "bg-gray-a3",
+                    index === active && "bg-kumo-tint",
                   )}
                   onMouseEnter={() => setActiveIndex(index)}
                   onClick={entry.run}
                 >
-                  <span className="shrink-0 text-gray-11">{entry.icon}</span>
+                  <span className="shrink-0 text-kumo-subtle">{entry.icon}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm">{entry.label}</span>
                     {entry.detail && (
-                      <span className="block truncate text-xs text-gray-11">
+                      <span className="block truncate text-xs text-kumo-subtle">
                         {entry.detail}
                       </span>
                     )}
@@ -278,7 +278,7 @@ export function CommandPalette({
             );
           })}
         </div>
-        <p className="border-t border-gray-a4 px-4 py-2 text-[11px] text-gray-11">
+        <p className="border-t border-kumo-hairline px-4 py-2 text-[11px] text-kumo-subtle">
           ↑↓ navigate · Enter select · Esc close
         </p>
       </div>
