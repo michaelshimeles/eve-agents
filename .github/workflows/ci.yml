@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard-template:
+    name: apps/eve is a mirror
+    if: ${{ !startsWith(github.head_ref, 'sync-ruth/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail when apps/eve is edited by hand
+        run: |
+          git fetch --quiet origin "${{ github.base_ref }}"
+          if git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- apps/eve | grep -q .; then
+            echo "::error::apps/eve is mirrored from boringcomputers/ruth by the sync-ruth workflow. Make agent changes in that repo instead."
+            git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- apps/eve
+            exit 1
+          fi
+          echo "No manual apps/eve edits."
+
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: npm install --no-audit --no-fund
+
+      - run: npm run typecheck
+
+      - run: npm run build

@@ -1,87 +1,45 @@
-/* Whop's Frosted UI provides the design tokens; Tailwind provides layout
-   utilities. The @theme block bridges Frosted's CSS variables into Tailwind
-   color utilities (bg-panel, text-gray-11, border-gray-a4, bg-accent-9, …). */
-@import "frosted-ui/styles.css";
+/* Kumo theme tokens must be registered before Tailwind itself. */
+@source "../../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
 @import "./typeset.css";
 /* Utility-only import (shimmer, scroll-fade, scrollbar helpers) used by the
    chat message scroller and attachments. Defines no color tokens. */
 @import "shadcn/tailwind.css";
 
-@theme inline {
-  --color-canvas: var(--color-background);
-  --color-panel: var(--color-panel-solid);
-  --color-panel-translucent: var(--color-panel-translucent);
-  --color-surface: var(--color-surface);
-  --color-overlay: var(--color-overlay);
-
-  --color-gray-1: var(--gray-1);
-  --color-gray-2: var(--gray-2);
-  --color-gray-3: var(--gray-3);
-  --color-gray-4: var(--gray-4);
-  --color-gray-5: var(--gray-5);
-  --color-gray-6: var(--gray-6);
-  --color-gray-7: var(--gray-7);
-  --color-gray-8: var(--gray-8);
-  --color-gray-9: var(--gray-9);
-  --color-gray-10: var(--gray-10);
-  --color-gray-11: var(--gray-11);
-  --color-gray-12: var(--gray-12);
-  --color-gray-a1: var(--gray-a1);
-  --color-gray-a2: var(--gray-a2);
-  --color-gray-a3: var(--gray-a3);
-  --color-gray-a4: var(--gray-a4);
-  --color-gray-a5: var(--gray-a5);
-  --color-gray-a6: var(--gray-a6);
-  --color-gray-a7: var(--gray-a7);
-  --color-gray-a8: var(--gray-a8);
-  --color-gray-a9: var(--gray-a9);
-  --color-gray-a10: var(--gray-a10);
-  --color-gray-a11: var(--gray-a11);
-  --color-gray-a12: var(--gray-a12);
-
-  --color-accent-1: var(--accent-1);
-  --color-accent-2: var(--accent-2);
-  --color-accent-3: var(--accent-3);
-  --color-accent-4: var(--accent-4);
-  --color-accent-5: var(--accent-5);
-  --color-accent-6: var(--accent-6);
-  --color-accent-7: var(--accent-7);
-  --color-accent-8: var(--accent-8);
-  --color-accent-9: var(--accent-9);
-  --color-accent-10: var(--accent-10);
-  --color-accent-11: var(--accent-11);
-  --color-accent-12: var(--accent-12);
-  --color-accent-contrast: var(--accent-9-contrast);
-  --color-accent-a3: var(--accent-a3);
-  --color-accent-a4: var(--accent-a4);
-
-  --color-danger-9: var(--danger-9);
-  --color-danger-10: var(--danger-10);
-  --color-danger-11: var(--danger-11);
-  --color-danger-a3: var(--danger-a3);
-  --color-success-9: var(--success-9);
-  --color-success-11: var(--success-11);
-  --color-warning-11: var(--warning-11);
-  --color-info-11: var(--info-11);
-}
-
 .typeset-docs {
-  --typeset-font-body: var(--default-font-family);
-  --typeset-font-heading: var(--default-font-family);
-  --typeset-font-mono: var(--code-font-family);
+  --typeset-font-body: var(--font-geist);
+  --typeset-font-heading: var(--font-geist);
+  --typeset-font-mono: var(--font-geist-mono);
   --typeset-size: 14px;
   --typeset-leading: 1.75;
   --typeset-flow: 1.25em;
 }
 
-.frosted-ui {
-  /* Bridge legacy variable names used by typeset.css onto Frosted tokens. */
-  --color-foreground: var(--gray-12);
-  --color-muted-foreground: var(--gray-11);
-  --color-muted: var(--gray-a3);
-  --color-border: var(--gray-a4);
-  --color-primary: var(--accent-9);
-  --color-ring: var(--accent-8);
+:root {
+  /* Bridge legacy variable names used by typeset.css onto Kumo tokens. */
+  --color-foreground: var(--text-color-kumo-default);
+  --color-muted-foreground: var(--text-color-kumo-subtle);
+  --color-muted: var(--color-kumo-tint);
+  --color-border: var(--color-kumo-hairline);
+  --color-primary: var(--color-kumo-brand);
+  --color-ring: var(--color-kumo-focus);
   --radius: 0.5rem;
+}
+
+@layer base {
+  body {
+    @apply bg-kumo-canvas text-kumo-default font-sans;
+  }
+}
+
+/* Kumo portals its dialog popup and backdrop with no z-index, so fixed app
+   chrome with a z-index (the z-40 sidebar) paints over them. Lift the
+   overlay layers above everything. */
+@layer components {
+  [role="dialog"].fixed,
+  [role="alertdialog"].fixed,
+  [role="presentation"].fixed.inset-0 {
+    z-index: 50;
+  }
 }

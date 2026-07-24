@@ -78,7 +78,16 @@ export const FEATURE_FILES: Record<FeatureId, readonly string[]> = {
   ],
   "file-sharing": ["agent/tools/share_file.ts"],
   integrations: ["agent/connections/composio.ts"],
-  browser: ["agent/extensions/browser.ts"],
+  browser: [
+    "agent/extensions/browser/extension.ts",
+    "agent/extensions/browser/tools/console.ts",
+    "agent/extensions/browser/tools/drag.ts",
+    "agent/extensions/browser/tools/hover.ts",
+    "agent/extensions/browser/tools/network_requests.ts",
+    "agent/extensions/browser/tools/set_checked.ts",
+    "agent/extensions/browser/tools/tabs.ts",
+    "agent/extensions/browser/tools/upload.ts",
+  ],
   utilities: ["agent/tools/get_weather.ts", "agent/tools/roll_dice.ts"],
 };
 

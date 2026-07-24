@@ -1,0 +1,79 @@
+name: Sync agent template from ruth
+
+# apps/eve mirrors boringcomputers/ruth (see apps/builder/scripts/
+# sync-template.sh). This workflow refreshes the mirror, verifies it
+# (typecheck includes the feature-manifest completeness check), and merges.
+# If verification fails - e.g. ruth added a tool no feature claims - the PR
+# stays open for a human to map it in apps/builder/lib/manifest.ts.
+
+on:
+  repository_dispatch:
+    types: [ruth-push]
+  workflow_dispatch:
+  schedule:
+    - cron: "23 */6 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-ruth
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Mirror apps/eve from ruth
+        run: bash apps/builder/scripts/sync-template.sh
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already in sync with ruth."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refresh lockfile
+        if: steps.changes.outputs.changed == 'true'
+        run: npm install --no-audit --no-fund
+
+      - name: Open sync PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="sync-ruth/$(date -u +%Y%m%d-%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "Sync agent template from ruth"
+          git push -u origin "$branch"
+          gh pr create \
+            --title "Sync agent template from ruth" \
+            --body "Automated mirror of apps/eve from boringcomputers/ruth. Merged automatically once typecheck (incl. manifest completeness) and builds pass in the sync workflow."
+
+      - name: Verify
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          npm run typecheck
+          npm run build
+
+      - name: Merge sync PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr merge --merge --delete-branch
