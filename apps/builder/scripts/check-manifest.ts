@@ -18,12 +18,19 @@ async function listPrunable(): Promise<string[]> {
     const absolute = path.join(eveRoot, dir);
     let entries;
     try {
-      entries = await readdir(absolute, { withFileTypes: true });
+      // Recursive: nested files (e.g. agent/extensions/browser/tools/*) are
+      // pruned by the assembler's prefix match, so they must be claimed too.
+      entries = await readdir(absolute, { withFileTypes: true, recursive: true });
     } catch {
       continue;
     }
     for (const entry of entries) {
-      if (entry.isFile()) found.push(`${dir}${entry.name}`);
+      if (!entry.isFile()) continue;
+      const relative = path
+        .relative(eveRoot, path.join(entry.parentPath, entry.name))
+        .split(path.sep)
+        .join("/");
+      found.push(relative);
     }
   }
   return found;

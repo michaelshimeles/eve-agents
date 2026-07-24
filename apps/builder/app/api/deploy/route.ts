@@ -44,6 +44,9 @@ function buildEnv(config: AgentConfig, stamps: UpdateStamps): EnvVar[] {
   const vapid = webpush.generateVAPIDKeys();
   const vars: EnvVar[] = [
     { key: "OWNER_NAME", value: config.ownerName.trim() },
+    // Display identity for the web UI; NEXT_PUBLIC_* is inlined at build time.
+    { key: "NEXT_PUBLIC_AGENT_NAME", value: config.agentName.trim() },
+    { key: "NEXT_PUBLIC_OWNER_NAME", value: config.ownerName.trim() },
     { key: "EVE_ENABLED_FEATURES", value: config.features.join(",") },
     { key: "NEXT_PUBLIC_VAPID_PUBLIC_KEY", value: vapid.publicKey },
     { key: "VAPID_PRIVATE_KEY", value: vapid.privateKey },
