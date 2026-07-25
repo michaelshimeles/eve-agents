@@ -16,6 +16,7 @@ import {
   CaretDownIcon,
   CheckIcon,
   CopyIcon,
+  EnvelopeIcon,
   FileIcon,
   GearSixIcon,
   GitBranchIcon,
@@ -23,6 +24,7 @@ import {
   MagnifyingGlassIcon,
   KeyIcon,
   MicrophoneIcon,
+  MonitorIcon,
   PaperclipIcon,
   PencilSimpleIcon,
   PlusIcon,
@@ -39,6 +41,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CommandPalette } from "@/components/command-palette";
+import { ComputerViewer } from "@/components/computer-viewer";
+import { EmailClient } from "@/components/email-client";
 import { ManagePanel } from "@/components/manage-panel";
 import { Markdown } from "@/components/markdown";
 import { usePushNotifications } from "@/components/use-push";
@@ -163,8 +167,8 @@ interface ThreadMeta {
   pinned?: boolean;
   /** Set once the user renames a thread, so auto-titles stop overwriting it. */
   renamed?: boolean;
-  /** Who started the thread; reminder/webhook threads get a sidebar badge. */
-  origin?: "web" | "reminder" | "webhook";
+  /** Who started the thread; proactive threads get a sidebar badge. */
+  origin?: "web" | "reminder" | "webhook" | "email";
 }
 
 interface ThreadIndex {
@@ -577,12 +581,27 @@ export function Chat({ initialView = "chat" }: { initialView?: MainView } = {}) 
   return <ChatApp initialView={initialView} />;
 }
 
-/** What the main column shows; the sidebar is shared between both. */
-type MainView = "chat" | "manage";
+/** What the main column shows; the sidebar is shared across all of them. */
+type MainView = "chat" | "manage" | "email";
+
+const VIEW_PATHS: Record<MainView, string> = { chat: "/", manage: "/manage", email: "/email" };
+
+function pathForView(view: MainView): string {
+  return VIEW_PATHS[view];
+}
+
+function viewForPath(pathname: string): MainView {
+  if (pathname === VIEW_PATHS.manage) return "manage";
+  if (pathname === VIEW_PATHS.email) return "email";
+  return "chat";
+}
 
 function ChatApp({ initialView }: { initialView: MainView }) {
   const [index, setIndex] = useState<ThreadIndex>(loadThreadIndex);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Live view of the cloud desktop, alongside whatever else is on screen.
+  const [desktopOpen, setDesktopOpen] = useState(false);
+  const [hasDesktop, setHasDesktop] = useState(false);
   // The thread meta is kept separately from the open flag so the dialog's
   // text doesn't blank out during its closing animation.
   const [threadToDelete, setThreadToDelete] = useState<ThreadMeta | null>(null);
@@ -613,9 +632,10 @@ function ChatApp({ initialView }: { initialView: MainView }) {
   // First run on this device (no stored seen map): the first server sync
   // adopts every thread as read so history doesn't arrive covered in dots.
   const needsSeenSeedRef = useRef(Object.keys(seenAt).length === 0);
-  // Whether the main column shows the chat or the manage panel. The sidebar
-  // stays mounted either way; the URL is kept in sync via pushState so
-  // /manage is linkable and back/forward work without remounting the app.
+  // Whether the main column shows the chat, the manage panel, or the email
+  // client. The sidebar stays mounted either way; the URL is kept in sync via
+  // pushState so /manage and /email are linkable and back/forward work without
+  // remounting the app.
   const [view, setView] = useState<MainView>(initialView);
   // Web push opt-in for proactive notifications.
   const push = usePushNotifications();
@@ -624,6 +644,9 @@ function ChatApp({ initialView }: { initialView: MainView }) {
   // Model picker: catalog from the Vercel AI Gateway, selection persisted.
   const [models, setModels] = useState<ModelOption[]>([]);
   const [model, setModel] = useState<string>(loadSavedModel);
+  // Which optional surfaces this deployment shipped, so the nav hides pages
+  // that would have nothing behind them. Assume present until told otherwise.
+  const [features, setFeatures] = useState<{ email: boolean }>({ email: true });
 
   useEffect(() => {
     void fetch("/api/models")
@@ -723,6 +746,25 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         setCommands([...BUILTIN_COMMANDS, ...skillCommands]);
       })
       .catch(() => undefined);
+  }, []);
+
+  // Only offer surfaces this deployment actually has - the desktop needs a
+  // configured Orgo key, and the email page can be shipped or not. Saving or
+  // removing a key in the manage panel announces itself so buttons appear or
+  // vanish without a reload.
+  useEffect(() => {
+    function check(): void {
+      void fetch("/api/features")
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { computer?: boolean; email?: boolean } | null) => {
+          setHasDesktop(body?.computer === true);
+          setFeatures({ email: body?.email !== false });
+        })
+        .catch(() => undefined);
+    }
+    check();
+    window.addEventListener("eve:features-changed", check);
+    return () => window.removeEventListener("eve:features-changed", check);
   }, []);
 
   // Pull the server's thread list on load: prefer the newer copy of each
@@ -895,11 +937,11 @@ function ChatApp({ initialView }: { initialView: MainView }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Back/forward between "/" and "/manage" (we navigate with pushState so the
-  // app, and especially the sidebar, never remounts).
+  // Back/forward between "/", "/manage", and "/email" (we navigate with
+  // pushState so the app, and especially the sidebar, never remounts).
   useEffect(() => {
     function onPopState() {
-      setView(window.location.pathname === "/manage" ? "manage" : "chat");
+      setView(viewForPath(window.location.pathname));
     }
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -909,7 +951,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
 
   function showView(next: MainView) {
     setView(next);
-    const path = next === "manage" ? "/manage" : "/";
+    const path = pathForView(next);
     if (window.location.pathname !== path) {
       window.history.pushState(null, "", path);
     }
@@ -1035,7 +1077,14 @@ function ChatApp({ initialView }: { initialView: MainView }) {
   }
 
   return (
-    <div className="flex h-dvh w-full">
+    <div
+      className={cn(
+        "flex h-dvh w-full",
+        // Give the desktop panel its own space instead of covering what is on
+        // screen, once the window is wide enough to spare it.
+        desktopOpen && "lg:pe-[36rem]",
+      )}
+    >
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
@@ -1079,6 +1128,34 @@ function ChatApp({ initialView }: { initialView: MainView }) {
                 }
                 className={cn(push.status !== "on" && "text-kumo-subtle")}
                 onClick={push.toggle}
+              />
+            )}
+            {features.email && (
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={EnvelopeIcon}
+                aria-label="Email"
+                aria-pressed={view === "email"}
+                title={`Email: ${AGENT_NAME}'s own inbox`}
+                className={cn(view === "email" && "bg-kumo-tint text-kumo-strong")}
+                onClick={() => showView(view === "email" ? "chat" : "email")}
+              />
+            )}
+            {hasDesktop && (
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={MonitorIcon}
+                aria-label={`${AGENT_NAME}'s desktop`}
+                aria-pressed={desktopOpen}
+                title={`${AGENT_NAME}'s desktop: watch her cloud computer live`}
+                className={cn(
+                  desktopOpen ? "bg-kumo-tint text-kumo-strong" : "text-kumo-subtle",
+                )}
+                onClick={() => setDesktopOpen((open) => !open)}
               />
             )}
             <Button
@@ -1192,6 +1269,8 @@ function ChatApp({ initialView }: { initialView: MainView }) {
             <ManagePanel onOpenThread={selectThread} />
           </div>
         </main>
+      ) : view === "email" ? (
+        <EmailClient onOpenSidebar={() => setSidebarOpen(true)} />
       ) : activeChat && activeChat.threadId === index.activeId ? (
         <ChatThread
           key={`${index.activeId}:${activeChat.revision ?? 0}`}
@@ -1217,12 +1296,15 @@ function ChatApp({ initialView }: { initialView: MainView }) {
             (activeChat.chat.events?.length ?? 0)
           }
           onResumed={(chat) => adoptResumedChat(index.activeId, chat)}
+          onWatchDesktop={() => setDesktopOpen(true)}
         />
       ) : (
         <main className="flex h-dvh min-w-0 flex-1 items-center justify-center text-kumo-subtle">
           <Loader size={20} />
         </main>
       )}
+
+      {desktopOpen && <DesktopDrawer onClose={() => setDesktopOpen(false)} />}
 
       <CommandPalette
         open={commandPaletteOpen}
@@ -1233,6 +1315,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         onSelectThread={selectThread}
         onNewChat={newThread}
         onOpenManage={() => showView("manage")}
+        onOpenEmail={features.email ? () => showView("email") : undefined}
         pushStatus={push.status}
         onTogglePush={push.toggle}
       />
@@ -1365,6 +1448,12 @@ function SidebarThread({
               aria-label="Started by a webhook"
             />
           )}
+          {thread.origin === "email" && (
+            <EnvelopeIcon
+              className="ms-1.5 size-3 shrink-0 text-kumo-subtle"
+              aria-label="Started by an incoming email"
+            />
+          )}
         </span>
         <span className="block text-xs text-kumo-subtle">
           {formatThreadDate(thread.updatedAt)}
@@ -1418,6 +1507,7 @@ function ChatThread({
   onReasoningChange,
   allowResume,
   onResumed,
+  onWatchDesktop,
 }: {
   threadId: string;
   initialChat: SavedChat;
@@ -1440,6 +1530,8 @@ function ChatThread({
   allowResume: boolean;
   /** A reattached stream settled; remount me with the merged chat. */
   onResumed: (chat: SavedChat) => void;
+  /** Opens the live view of the cloud desktop, shared with the app header. */
+  onWatchDesktop: () => void;
 }) {
   const [draft, setDraft] = useState(initialDraft ?? "");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -1958,6 +2050,7 @@ function ChatThread({
                       onRegenerate={regenerateLastReply}
                       onFork={forkFromMessage}
                       onRespond={respondToInput}
+                      onWatchDesktop={onWatchDesktop}
                     />
                   </MessageScrollerItem>
                 ))}
@@ -2176,6 +2269,45 @@ function ChatThread({
         </footer>
       </div>
     </main>
+  );
+}
+
+/**
+ * Side panel holding the live desktop. Deliberately not a modal: the point is
+ * to watch the agent work while the conversation carries on next to it.
+ */
+function DesktopDrawer({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" aria-hidden onClick={onClose} />
+      <aside
+        aria-label={`${AGENT_NAME}'s desktop`}
+        className="fixed inset-y-0 end-0 z-50 flex w-full max-w-xl flex-col gap-3 border-s border-kumo-hairline bg-kumo-elevated p-4 shadow-xl"
+      >
+        <div className="flex items-center gap-2">
+          <MonitorIcon className="size-4" />
+          <h2 className="text-sm font-medium">{AGENT_NAME}&rsquo;s desktop</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={XIcon}
+            aria-label="Close desktop"
+            className="ms-auto"
+            onClick={onClose}
+          />
+        </div>
+        <ComputerViewer />
+      </aside>
+    </>
   );
 }
 
@@ -2481,6 +2613,7 @@ function ChatMessage({
   onRegenerate,
   onFork,
   onRespond,
+  onWatchDesktop,
 }: {
   message: EveMessage;
   usage?: TurnUsage;
@@ -2492,6 +2625,7 @@ function ChatMessage({
   onRegenerate: () => void;
   onFork: (message: EveMessage, includeTurn: boolean, draft?: string) => void;
   onRespond: (requestId: string, optionId: string) => void;
+  onWatchDesktop: () => void;
 }) {
   const align = message.role === "user" ? "end" : "start";
   const text = messageText(message);
@@ -2503,7 +2637,13 @@ function ChatMessage({
     <Message align={align}>
       <MessageContent className="gap-2">
         {message.parts.map((part, index) => (
-          <ChatPart key={index} part={part} role={message.role} onRespond={onRespond} />
+          <ChatPart
+            key={index}
+            part={part}
+            role={message.role}
+            onRespond={onRespond}
+            onWatchDesktop={onWatchDesktop}
+          />
         ))}
         {message.role === "assistant" && text.length > 0 && (
           <div className={cn(actionRowClass, !assistantDone && "invisible")}>
@@ -2582,10 +2722,12 @@ function ChatPart({
   part,
   role,
   onRespond,
+  onWatchDesktop,
 }: {
   part: EveMessagePart;
   role: "assistant" | "user";
   onRespond: (requestId: string, optionId: string) => void;
+  onWatchDesktop: () => void;
 }) {
   switch (part.type) {
     case "text": {
@@ -2670,21 +2812,30 @@ function ChatPart({
 
       return (
         <div className="flex flex-col gap-2">
-          {expandable ? (
-            <details>
-              <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
-                {marker}
-              </summary>
-              <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
-                <ToolPayload label="Input" value={part.input} />
-                {part.state === "output-available" && (
-                  <ToolPayload label="Output" value={part.output} />
-                )}
-              </div>
-            </details>
-          ) : (
-            marker
-          )}
+          <div className="flex items-start gap-1">
+            {expandable ? (
+              <details className="min-w-0">
+                <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
+                  {marker}
+                </summary>
+                <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
+                  <ToolPayload label="Input" value={part.input} />
+                  {part.state === "output-available" && (
+                    <ToolPayload label="Output" value={part.output} />
+                  )}
+                </div>
+              </details>
+            ) : (
+              marker
+            )}
+            {/* The desktop is the one tool whose work is worth watching live. */}
+            {part.toolName.startsWith("computer_") && (
+              <Button variant="ghost" size="sm" onClick={onWatchDesktop}>
+                <MonitorIcon />
+                Watch
+              </Button>
+            )}
+          </div>
           {part.state === "output-error" && (
             <Bubble variant="destructive">
               <BubbleContent>{part.errorText}</BubbleContent>
