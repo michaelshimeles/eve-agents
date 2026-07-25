@@ -79,6 +79,12 @@ function reasoningMiddleware(reasoning: ReasoningLevel): LanguageModelMiddleware
 }
 
 export default defineAgent({
+  build: {
+    // Remotion's bundler/renderer pull in webpack/rspack and platform
+    // binaries (headless shell, compositor) that must stay external; eve
+    // traces them into the hosted output instead of bundling them.
+    externalDependencies: ["remotion", "@remotion/bundler", "@remotion/renderer"],
+  },
   model: defineDynamic({
     fallback: DEFAULT_MODEL,
     events: {
