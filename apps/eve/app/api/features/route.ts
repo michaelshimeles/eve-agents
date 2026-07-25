@@ -1,3 +1,4 @@
+import { orgoConfigured } from "@/agent/lib/orgo";
 import { requireWebAuth } from "@/lib/web-auth";
 
 // Which optional capabilities this deployment actually has, so the UI can
@@ -14,6 +15,7 @@ const ALL_FEATURES = [
   "file-sharing",
   "integrations",
   "browser",
+  "computer",
   "utilities",
 ] as const;
 
@@ -43,5 +45,10 @@ export async function GET(request: Request): Promise<Response> {
     proactive: on.has("proactive"),
     integrations: on.has("integrations") && hasEnv("COMPOSIO_API_KEY"),
     skills: on.has("skills") && hasEnv("BLOB_READ_WRITE_TOKEN"),
+    // Configured means a key exists (environment or app settings); available
+    // means the deployment ships the feature at all. The manage tab shows on
+    // available so a key can be added there in the first place.
+    computer: on.has("computer") && (await orgoConfigured()),
+    computerAvailable: on.has("computer"),
   });
 }

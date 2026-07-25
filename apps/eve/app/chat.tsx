@@ -23,6 +23,7 @@ import {
   MagnifyingGlassIcon,
   KeyIcon,
   MicrophoneIcon,
+  MonitorIcon,
   PaperclipIcon,
   PencilSimpleIcon,
   PlusIcon,
@@ -39,6 +40,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CommandPalette } from "@/components/command-palette";
+import { ComputerViewer } from "@/components/computer-viewer";
 import { ManagePanel } from "@/components/manage-panel";
 import { Markdown } from "@/components/markdown";
 import { usePushNotifications } from "@/components/use-push";
@@ -583,6 +585,9 @@ type MainView = "chat" | "manage";
 function ChatApp({ initialView }: { initialView: MainView }) {
   const [index, setIndex] = useState<ThreadIndex>(loadThreadIndex);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Live view of the cloud desktop, alongside whatever else is on screen.
+  const [desktopOpen, setDesktopOpen] = useState(false);
+  const [hasDesktop, setHasDesktop] = useState(false);
   // The thread meta is kept separately from the open flag so the dialog's
   // text doesn't blank out during its closing animation.
   const [threadToDelete, setThreadToDelete] = useState<ThreadMeta | null>(null);
@@ -723,6 +728,21 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         setCommands([...BUILTIN_COMMANDS, ...skillCommands]);
       })
       .catch(() => undefined);
+  }, []);
+
+  // Only offer the desktop when this deployment actually has one. Saving or
+  // removing a key in the manage panel announces itself so the button appears
+  // or vanishes without a reload.
+  useEffect(() => {
+    function check(): void {
+      void fetch("/api/features")
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { computer?: boolean } | null) => setHasDesktop(body?.computer === true))
+        .catch(() => undefined);
+    }
+    check();
+    window.addEventListener("eve:features-changed", check);
+    return () => window.removeEventListener("eve:features-changed", check);
   }, []);
 
   // Pull the server's thread list on load: prefer the newer copy of each
@@ -1035,7 +1055,14 @@ function ChatApp({ initialView }: { initialView: MainView }) {
   }
 
   return (
-    <div className="flex h-dvh w-full">
+    <div
+      className={cn(
+        "flex h-dvh w-full",
+        // Give the desktop panel its own space instead of covering what is on
+        // screen, once the window is wide enough to spare it.
+        desktopOpen && "lg:pe-[36rem]",
+      )}
+    >
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
@@ -1079,6 +1106,21 @@ function ChatApp({ initialView }: { initialView: MainView }) {
                 }
                 className={cn(push.status !== "on" && "text-kumo-subtle")}
                 onClick={push.toggle}
+              />
+            )}
+            {hasDesktop && (
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={MonitorIcon}
+                aria-label={`${AGENT_NAME}'s desktop`}
+                aria-pressed={desktopOpen}
+                title={`${AGENT_NAME}'s desktop: watch her cloud computer live`}
+                className={cn(
+                  desktopOpen ? "bg-kumo-tint text-kumo-strong" : "text-kumo-subtle",
+                )}
+                onClick={() => setDesktopOpen((open) => !open)}
               />
             )}
             <Button
@@ -1217,12 +1259,15 @@ function ChatApp({ initialView }: { initialView: MainView }) {
             (activeChat.chat.events?.length ?? 0)
           }
           onResumed={(chat) => adoptResumedChat(index.activeId, chat)}
+          onWatchDesktop={() => setDesktopOpen(true)}
         />
       ) : (
         <main className="flex h-dvh min-w-0 flex-1 items-center justify-center text-kumo-subtle">
           <Loader size={20} />
         </main>
       )}
+
+      {desktopOpen && <DesktopDrawer onClose={() => setDesktopOpen(false)} />}
 
       <CommandPalette
         open={commandPaletteOpen}
@@ -1418,6 +1463,7 @@ function ChatThread({
   onReasoningChange,
   allowResume,
   onResumed,
+  onWatchDesktop,
 }: {
   threadId: string;
   initialChat: SavedChat;
@@ -1440,6 +1486,8 @@ function ChatThread({
   allowResume: boolean;
   /** A reattached stream settled; remount me with the merged chat. */
   onResumed: (chat: SavedChat) => void;
+  /** Opens the live view of the cloud desktop, shared with the app header. */
+  onWatchDesktop: () => void;
 }) {
   const [draft, setDraft] = useState(initialDraft ?? "");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -1958,6 +2006,7 @@ function ChatThread({
                       onRegenerate={regenerateLastReply}
                       onFork={forkFromMessage}
                       onRespond={respondToInput}
+                      onWatchDesktop={onWatchDesktop}
                     />
                   </MessageScrollerItem>
                 ))}
@@ -2176,6 +2225,45 @@ function ChatThread({
         </footer>
       </div>
     </main>
+  );
+}
+
+/**
+ * Side panel holding the live desktop. Deliberately not a modal: the point is
+ * to watch the agent work while the conversation carries on next to it.
+ */
+function DesktopDrawer({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" aria-hidden onClick={onClose} />
+      <aside
+        aria-label={`${AGENT_NAME}'s desktop`}
+        className="fixed inset-y-0 end-0 z-50 flex w-full max-w-xl flex-col gap-3 border-s border-kumo-hairline bg-kumo-elevated p-4 shadow-xl"
+      >
+        <div className="flex items-center gap-2">
+          <MonitorIcon className="size-4" />
+          <h2 className="text-sm font-medium">{AGENT_NAME}&rsquo;s desktop</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={XIcon}
+            aria-label="Close desktop"
+            className="ms-auto"
+            onClick={onClose}
+          />
+        </div>
+        <ComputerViewer />
+      </aside>
+    </>
   );
 }
 
@@ -2481,6 +2569,7 @@ function ChatMessage({
   onRegenerate,
   onFork,
   onRespond,
+  onWatchDesktop,
 }: {
   message: EveMessage;
   usage?: TurnUsage;
@@ -2492,6 +2581,7 @@ function ChatMessage({
   onRegenerate: () => void;
   onFork: (message: EveMessage, includeTurn: boolean, draft?: string) => void;
   onRespond: (requestId: string, optionId: string) => void;
+  onWatchDesktop: () => void;
 }) {
   const align = message.role === "user" ? "end" : "start";
   const text = messageText(message);
@@ -2503,7 +2593,13 @@ function ChatMessage({
     <Message align={align}>
       <MessageContent className="gap-2">
         {message.parts.map((part, index) => (
-          <ChatPart key={index} part={part} role={message.role} onRespond={onRespond} />
+          <ChatPart
+            key={index}
+            part={part}
+            role={message.role}
+            onRespond={onRespond}
+            onWatchDesktop={onWatchDesktop}
+          />
         ))}
         {message.role === "assistant" && text.length > 0 && (
           <div className={cn(actionRowClass, !assistantDone && "invisible")}>
@@ -2582,10 +2678,12 @@ function ChatPart({
   part,
   role,
   onRespond,
+  onWatchDesktop,
 }: {
   part: EveMessagePart;
   role: "assistant" | "user";
   onRespond: (requestId: string, optionId: string) => void;
+  onWatchDesktop: () => void;
 }) {
   switch (part.type) {
     case "text": {
@@ -2670,21 +2768,30 @@ function ChatPart({
 
       return (
         <div className="flex flex-col gap-2">
-          {expandable ? (
-            <details>
-              <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
-                {marker}
-              </summary>
-              <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
-                <ToolPayload label="Input" value={part.input} />
-                {part.state === "output-available" && (
-                  <ToolPayload label="Output" value={part.output} />
-                )}
-              </div>
-            </details>
-          ) : (
-            marker
-          )}
+          <div className="flex items-start gap-1">
+            {expandable ? (
+              <details className="min-w-0">
+                <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
+                  {marker}
+                </summary>
+                <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
+                  <ToolPayload label="Input" value={part.input} />
+                  {part.state === "output-available" && (
+                    <ToolPayload label="Output" value={part.output} />
+                  )}
+                </div>
+              </details>
+            ) : (
+              marker
+            )}
+            {/* The desktop is the one tool whose work is worth watching live. */}
+            {part.toolName.startsWith("computer_") && (
+              <Button variant="ghost" size="sm" onClick={onWatchDesktop}>
+                <MonitorIcon />
+                Watch
+              </Button>
+            )}
+          </div>
           {part.state === "output-error" && (
             <Bubble variant="destructive">
               <BubbleContent>{part.errorText}</BubbleContent>
