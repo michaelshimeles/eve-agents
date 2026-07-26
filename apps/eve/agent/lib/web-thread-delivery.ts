@@ -30,7 +30,7 @@ function clipTitle(title: string): string {
 export async function deliverToWebChatThread(
   title: string,
   message: string,
-  origin: "reminder" | "webhook" = "reminder",
+  origin: "reminder" | "webhook" | "email" = "reminder",
 ): Promise<string> {
   const client = new Client({ host: baseUrl() });
   const session = client.session();

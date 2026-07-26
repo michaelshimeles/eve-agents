@@ -14,6 +14,7 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
+import { ComputerViewer } from "@/components/computer-viewer";
 import { AGENT_NAME } from "@/lib/identity";
 import { cn } from "@/lib/utils";
 
@@ -532,6 +533,9 @@ interface FeatureFlags {
   proactive: boolean;
   integrations: boolean;
   skills: boolean;
+  /** Deployment ships the desktop feature; the tab doubles as key setup, so it
+   * shows even before a key is configured. */
+  computerAvailable: boolean;
 }
 
 // Personal deployments have everything; builder deployments report what they
@@ -541,6 +545,7 @@ const ALL_FEATURES_ON: FeatureFlags = {
   proactive: true,
   integrations: true,
   skills: true,
+  computerAvailable: true,
 };
 
 interface UpdateInfo {
@@ -650,6 +655,7 @@ export function ManagePanel({
       : []),
     ...(features.integrations ? [{ value: "connections", label: "Connections" }] : []),
     ...(features.skills ? [{ value: "skills", label: "Skills" }] : []),
+    ...(features.computerAvailable ? [{ value: "computer", label: "Computer" }] : []),
   ];
 
   // If the active tab's feature turns out to be absent, land on the first
@@ -821,6 +827,8 @@ export function ManagePanel({
         {tab === "connections" && <ConnectionsTab />}
 
         {tab === "skills" && <SkillsTab />}
+
+        {tab === "computer" && <ComputerViewer />}
       </div>
     </div>
   );
