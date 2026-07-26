@@ -30,7 +30,7 @@ function clipTitle(title: string): string {
 export async function deliverToWebChatThread(
   title: string,
   message: string,
-  origin: "reminder" | "webhook" = "reminder",
+  origin: "reminder" | "webhook" | "email" = "reminder",
 ): Promise<string> {
   const client = new Client({ host: baseUrl() });
   const session = client.session();
@@ -40,17 +40,21 @@ export async function deliverToWebChatThread(
   for await (const event of response) events.push(event);
 
   const threadId = crypto.randomUUID();
+  // savedAt matches updatedAt, like the web client's own writes, so the UI's
+  // staleness check (savedAt vs meta.updatedAt) sees an adopted copy as
+  // current instead of probing the server again on every visit.
+  const writtenAt = Date.now();
   await upsertThread(
     threadId,
     {
       title: clipTitle(title),
-      updatedAt: Date.now(),
+      updatedAt: writtenAt,
       pinned: false,
       // Keeps the UI's auto-titling from overwriting the descriptive title.
       renamed: true,
       origin,
     },
-    { events, session: session.state },
+    { events, session: session.state, savedAt: writtenAt },
   );
 
   // Best-effort: the thread is already persisted, so a notification failure
