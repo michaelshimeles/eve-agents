@@ -1,7 +1,8 @@
 "use client";
 
 import type { UserContent } from "ai";
-import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+import type { CatchUpStop } from "@/lib/thread-sync";
+import type { ClientSession, HandleMessageStreamEvent, SessionState } from "eve/client";
 import { Client, defaultMessageReducer, isCurrentTurnBoundaryEvent } from "eve/client";
 import { useEveAgent } from "eve/react";
 import type { EveMessage, EveMessagePart } from "eve/react";
@@ -16,6 +17,7 @@ import {
   CaretDownIcon,
   CheckIcon,
   CopyIcon,
+  EnvelopeIcon,
   FileIcon,
   GearSixIcon,
   GitBranchIcon,
@@ -23,6 +25,7 @@ import {
   MagnifyingGlassIcon,
   KeyIcon,
   MicrophoneIcon,
+  MonitorIcon,
   PaperclipIcon,
   PencilSimpleIcon,
   PlusIcon,
@@ -39,6 +42,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CommandPalette } from "@/components/command-palette";
+import { ComputerViewer } from "@/components/computer-viewer";
+import { EmailClient } from "@/components/email-client";
 import { ManagePanel } from "@/components/manage-panel";
 import { Markdown } from "@/components/markdown";
 import { usePushNotifications } from "@/components/use-push";
@@ -65,14 +70,55 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
 import { AGENT_NAME, OWNER_NAME } from "@/lib/identity";
+import {
+  chatKey,
+  clearTombstone,
+  compactChatForStorage,
+  fetchServerChat,
+  fetchServerThreads,
+  isStrippedUrl,
+  loadDraft,
+  loadSavedChat,
+  loadTombstones,
+  messageEchoText,
+  queueThreadDelete,
+  queueThreadUpsert,
+  readCatchUpStream,
+  recordTombstone,
+  saveDraft,
+  saveLocalChat,
+  sessionHasEventAt,
+  TOMBSTONES_KEY,
+  type SavedChat,
+  type ThreadMeta,
+} from "@/lib/thread-sync";
 import { cn } from "@/lib/utils";
 
 const THREADS_KEY = "eve-web-threads";
 const SEEN_KEY = "eve-web-threads-seen";
+// Which thread is open rides in sessionStorage so it is per-tab: the shared
+// index's activeId (kept as a cold-start fallback) is last-writer-wins across
+// tabs, which used to reopen whatever thread *another* tab had active after a
+// reload.
+const ACTIVE_THREAD_KEY = "eve-web-active-thread";
 const LEGACY_CHAT_KEY = "eve-web-chat";
 const MODEL_KEY = "eve-web-model";
-const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5";
+/** Last-resort default when `/api/models` is unreachable. Live default comes from the Gateway catalog. */
+const FALLBACK_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5";
 const REASONING_KEY = "eve-web-reasoning";
+/** Models released within this window get a "New" mark in the picker. */
+const NEW_MODEL_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * The desktop panel's visibility rides in the URL (`?desktop=1`) so a reload
+ * or a shared link comes back with the panel open, and back/forward walk
+ * through opening and closing it like any other navigation.
+ */
+const DESKTOP_PARAM = "desktop";
+
+function desktopOpenFromLocation(): boolean {
+  return new URLSearchParams(window.location.search).has(DESKTOP_PARAM);
+}
 
 /**
  * Reasoning effort riding along with each turn. "default" sends nothing and
@@ -105,6 +151,19 @@ interface ModelOption {
   name: string;
   description?: string | null;
   pricing?: { input: string; output: string } | null;
+  /** Unix seconds from the Gateway catalog; used for the "New" mark. */
+  released?: number | null;
+}
+
+interface ModelsResponse {
+  models?: ModelOption[];
+  defaultModel?: string;
+}
+
+function isNewModel(released: number | null | undefined, now = Date.now()): boolean {
+  if (released == null || !Number.isFinite(released)) return false;
+  const releasedMs = released * 1000;
+  return releasedMs <= now && now - releasedMs <= NEW_MODEL_WINDOW_MS;
 }
 
 const MODEL_FAVORITES_KEY = "eve-web-model-favorites";
@@ -133,38 +192,10 @@ function priceTier(pricing: ModelOption["pricing"]): string {
 
 function loadSavedModel(): string {
   try {
-    return localStorage.getItem(MODEL_KEY) ?? DEFAULT_MODEL_ID;
+    return localStorage.getItem(MODEL_KEY) ?? FALLBACK_DEFAULT_MODEL_ID;
   } catch {
-    return DEFAULT_MODEL_ID;
+    return FALLBACK_DEFAULT_MODEL_ID;
   }
-}
-
-function chatKey(threadId: string): string {
-  return `eve-web-chat:${threadId}`;
-}
-
-interface SavedChat {
-  events?: readonly HandleMessageStreamEvent[];
-  session?: SessionState;
-  /** When this device wrote the copy; lets cross-device sync spot staleness. */
-  savedAt?: number;
-  /**
-   * Set on threads forked from a message. eve sessions are append-only, so a
-   * fork starts a fresh session; this transcript rides along as one-turn
-   * client context on the fork's first send so the agent knows the history.
-   */
-  forkContext?: string;
-}
-
-interface ThreadMeta {
-  id: string;
-  title: string;
-  updatedAt: number;
-  pinned?: boolean;
-  /** Set once the user renames a thread, so auto-titles stop overwriting it. */
-  renamed?: boolean;
-  /** Who started the thread; reminder/webhook threads get a sidebar badge. */
-  origin?: "web" | "reminder" | "webhook";
 }
 
 interface ThreadIndex {
@@ -182,9 +213,19 @@ function loadThreadIndex(): ThreadIndex {
     if (raw) {
       const parsed = JSON.parse(raw) as ThreadIndex;
       if (Array.isArray(parsed.threads) && parsed.threads.length > 0) {
-        const activeId = parsed.threads.some((thread) => thread.id === parsed.activeId)
-          ? parsed.activeId
-          : parsed.threads[0].id;
+        // This tab's own last-open thread wins over the shared activeId.
+        let tabActiveId: string | null = null;
+        try {
+          tabActiveId = sessionStorage.getItem(ACTIVE_THREAD_KEY);
+        } catch {
+          // Session storage unavailable; use the shared value.
+        }
+        const activeId =
+          tabActiveId !== null && parsed.threads.some((thread) => thread.id === tabActiveId)
+            ? tabActiveId
+            : parsed.threads.some((thread) => thread.id === parsed.activeId)
+              ? parsed.activeId
+              : parsed.threads[0].id;
         return { activeId, threads: parsed.threads };
       }
     }
@@ -202,13 +243,32 @@ function loadThreadIndex(): ThreadIndex {
   }
 }
 
-function loadSavedChat(threadId: string): SavedChat | null {
-  try {
-    const raw = localStorage.getItem(chatKey(threadId));
-    return raw ? (JSON.parse(raw) as SavedChat) : null;
-  } catch {
-    return null;
+/**
+ * Session cursor derived from the saved event log rather than trusted from
+ * the saved cursor object. Mid-turn saves (and rows written by older code)
+ * can carry a cursor that lags the events - a stream index from before the
+ * turn, or a continuation token from an earlier park. Sending or streaming
+ * with such a mixed cursor makes the client replay an old turn and stop at
+ * its boundary, so a fresh exchange never renders. The saved events are
+ * exactly the server stream, so the true index is their count, and the
+ * right continuation token is the one carried by the last settled park.
+ */
+function normalizedSavedSession(chat: SavedChat): SessionState | undefined {
+  const session = chat.session;
+  if (session?.sessionId === undefined) return session;
+  const events = chat.events ?? [];
+  let continuationToken = session.continuationToken;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (isCurrentTurnBoundaryEvent(event)) {
+      if (event.type === "session.waiting") continuationToken = event.data.continuationToken;
+      break;
+    }
   }
+  if (session.streamIndex === events.length && session.continuationToken === continuationToken) {
+    return session;
+  }
+  return { ...session, streamIndex: events.length, continuationToken };
 }
 
 /**
@@ -226,69 +286,6 @@ function isInterruptedChat(chat: SavedChat): boolean {
   if (last === undefined) return true;
   if (last.type === "input.requested" || last.type === "authorization.required") return false;
   return !isCurrentTurnBoundaryEvent(last);
-}
-
-function saveLocalChat(threadId: string, chat: SavedChat): void {
-  try {
-    localStorage.setItem(chatKey(threadId), JSON.stringify({ ...chat, savedAt: Date.now() }));
-  } catch {
-    // Storage full or unavailable; the server copy still gets written.
-  }
-}
-
-// --- Server persistence (Neon via /api/threads, same basic-auth realm) ---
-
-function threadMetaBody(meta: ThreadMeta) {
-  return {
-    title: meta.title,
-    updatedAt: meta.updatedAt,
-    pinned: meta.pinned === true,
-    renamed: meta.renamed === true,
-    origin: meta.origin,
-  };
-}
-
-function putThreadToServer(meta: ThreadMeta, chat: SavedChat): void {
-  void fetch(`/api/threads/${meta.id}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...threadMetaBody(meta), chat }),
-  }).catch(() => undefined);
-}
-
-/** Persists rename/pin changes without re-uploading the chat payload. */
-function putThreadMetaToServer(meta: ThreadMeta): void {
-  void fetch(`/api/threads/${meta.id}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(threadMetaBody(meta)),
-  }).catch(() => undefined);
-}
-
-function deleteThreadOnServer(id: string): void {
-  void fetch(`/api/threads/${id}`, { method: "DELETE" }).catch(() => undefined);
-}
-
-async function fetchServerThreads(): Promise<ThreadMeta[] | null> {
-  try {
-    const response = await fetch("/api/threads");
-    if (!response.ok) return null;
-    const body = (await response.json()) as { threads?: ThreadMeta[] };
-    return Array.isArray(body.threads) ? body.threads : null;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchServerChat(id: string): Promise<SavedChat | null> {
-  try {
-    const response = await fetch(`/api/threads/${id}`);
-    if (!response.ok) return null;
-    const body = (await response.json()) as { chat?: SavedChat };
-    return body.chat ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function toThreadTitle(text: string): string {
@@ -462,6 +459,26 @@ function CopyButton({ text, label = "Copy message" }: { text: string; label?: st
   );
 }
 
+/** An inline screenshot in a tool's output, when the tool captured one. */
+function outputImageDataUrl(output: unknown): string | null {
+  if (output === null || typeof output !== "object") return null;
+  const { imageDataUrl } = output as { imageDataUrl?: unknown };
+  return typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:image/")
+    ? imageDataUrl
+    : null;
+}
+
+/**
+ * The raw payload dump with any inline image collapsed to a stub: the image
+ * renders right above it, and a megabyte of base64 would bury every other
+ * field in the expanded view.
+ */
+function compactToolOutput(output: unknown): unknown {
+  if (outputImageDataUrl(output) === null) return output;
+  const { imageDataUrl, ...rest } = output as { imageDataUrl: string } & Record<string, unknown>;
+  return { ...rest, imageDataUrl: `<inline image, ${Math.round(imageDataUrl.length / 1024)} kB>` };
+}
+
 function ToolPayload({ label, value }: { label: string; value: unknown }) {
   let text: string;
   try {
@@ -577,12 +594,28 @@ export function Chat({ initialView = "chat" }: { initialView?: MainView } = {}) 
   return <ChatApp initialView={initialView} />;
 }
 
-/** What the main column shows; the sidebar is shared between both. */
-type MainView = "chat" | "manage";
+/** What the main column shows; the sidebar is shared across all of them. */
+type MainView = "chat" | "manage" | "email";
+
+const VIEW_PATHS: Record<MainView, string> = { chat: "/", manage: "/manage", email: "/email" };
+
+function pathForView(view: MainView): string {
+  return VIEW_PATHS[view];
+}
+
+function viewForPath(pathname: string): MainView {
+  if (pathname === VIEW_PATHS.manage) return "manage";
+  if (pathname === VIEW_PATHS.email) return "email";
+  return "chat";
+}
 
 function ChatApp({ initialView }: { initialView: MainView }) {
   const [index, setIndex] = useState<ThreadIndex>(loadThreadIndex);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Live view of the cloud desktop, alongside whatever else is on screen.
+  // Mirrored in the URL; change it through showDesktop, not the setter.
+  const [desktopOpen, setDesktopOpen] = useState(desktopOpenFromLocation);
+  const [hasDesktop, setHasDesktop] = useState(false);
   // The thread meta is kept separately from the open flag so the dialog's
   // text doesn't blank out during its closing animation.
   const [threadToDelete, setThreadToDelete] = useState<ThreadMeta | null>(null);
@@ -613,37 +646,54 @@ function ChatApp({ initialView }: { initialView: MainView }) {
   // First run on this device (no stored seen map): the first server sync
   // adopts every thread as read so history doesn't arrive covered in dots.
   const needsSeenSeedRef = useRef(Object.keys(seenAt).length === 0);
-  // Whether the main column shows the chat or the manage panel. The sidebar
-  // stays mounted either way; the URL is kept in sync via pushState so
-  // /manage is linkable and back/forward work without remounting the app.
+  // Whether the main column shows the chat, the manage panel, or the email
+  // client. The sidebar stays mounted either way; the URL is kept in sync via
+  // pushState so /manage and /email are linkable and back/forward work without
+  // remounting the app.
   const [view, setView] = useState<MainView>(initialView);
   // Web push opt-in for proactive notifications.
   const push = usePushNotifications();
   // Slash-command palette: built-ins plus skills saved from chat.
   const [commands, setCommands] = useState<SlashCommand[]>(BUILTIN_COMMANDS);
-  // Model picker: catalog from the Vercel AI Gateway, selection persisted.
+  // Model picker: live Gateway catalog (refreshed on mount and when opened).
   const [models, setModels] = useState<ModelOption[]>([]);
   const [model, setModel] = useState<string>(loadSavedModel);
+  // Which optional surfaces this deployment shipped, so the nav hides pages
+  // that would have nothing behind them. Assume present until told otherwise.
+  const [features, setFeatures] = useState<{ email: boolean }>({ email: true });
 
-  useEffect(() => {
-    void fetch("/api/models")
+  function applyModelsCatalog(body: ModelsResponse | null) {
+    if (!body) return;
+    const nextDefault =
+      typeof body.defaultModel === "string" && body.defaultModel.length > 0
+        ? body.defaultModel
+        : FALLBACK_DEFAULT_MODEL_ID;
+    if (!body.models?.length) return;
+    setModels(body.models);
+    // A saved model that left the catalog would fail every turn; fall
+    // back to the live default rather than keep sending a stale id.
+    setModel((current) => {
+      if (body.models?.some((option) => option.id === current)) return current;
+      try {
+        localStorage.setItem(MODEL_KEY, nextDefault);
+      } catch {
+        // Storage unavailable; the reset still applies for this session.
+      }
+      return nextDefault;
+    });
+  }
+
+  function refreshModels() {
+    return fetch("/api/models")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body: { models?: ModelOption[] } | null) => {
-        if (!body?.models?.length) return;
-        setModels(body.models);
-        // A saved model that left the catalog would fail every turn; fall
-        // back to the default rather than keep sending a stale id.
-        setModel((current) => {
-          if (body.models?.some((option) => option.id === current)) return current;
-          try {
-            localStorage.setItem(MODEL_KEY, DEFAULT_MODEL_ID);
-          } catch {
-            // Storage unavailable; the reset still applies for this session.
-          }
-          return DEFAULT_MODEL_ID;
-        });
+      .then((body: ModelsResponse | null) => {
+        applyModelsCatalog(body);
       })
       .catch(() => undefined);
+  }
+
+  useEffect(() => {
+    void refreshModels();
   }, []);
 
   function selectModel(id: string) {
@@ -681,6 +731,15 @@ function ChatApp({ initialView }: { initialView: MainView }) {
       // Storage full or unavailable; sessions still live server-side.
     }
   }, [index]);
+
+  // Remember this tab's open thread across its own reloads.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(ACTIVE_THREAD_KEY, index.activeId);
+    } catch {
+      // Session storage unavailable; the shared activeId still applies.
+    }
+  }, [index.activeId]);
 
   useEffect(() => {
     try {
@@ -725,24 +784,77 @@ function ChatApp({ initialView }: { initialView: MainView }) {
       .catch(() => undefined);
   }, []);
 
+  // Only offer surfaces this deployment actually has - the desktop needs a
+  // configured Orgo key, and the email page can be shipped or not. Saving or
+  // removing a key in the manage panel announces itself so buttons appear or
+  // vanish without a reload.
+  useEffect(() => {
+    function check(): void {
+      void fetch("/api/features")
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { computer?: boolean; email?: boolean } | null) => {
+          setHasDesktop(body?.computer === true);
+          setFeatures({ email: body?.email !== false });
+        })
+        .catch(() => undefined);
+    }
+    check();
+    window.addEventListener("eve:features-changed", check);
+    return () => window.removeEventListener("eve:features-changed", check);
+  }, []);
+
+  // Callbacks and the sync sweep need the live busy set, not a stale capture.
+  const busyIdsRef = useRef(busyIds);
+  useEffect(() => {
+    busyIdsRef.current = busyIds;
+  }, [busyIds]);
+
   // Pull the server's thread list on load: prefer the newer copy of each
-  // thread, adopt threads created on other devices, and upload any threads
-  // the server doesn't know about yet. Re-synced on focus and on a slow
+  // thread, adopt threads created on other devices, and re-push any thread
+  // whose local copy is ahead of the server (a PUT that failed or never got
+  // to run before the tab died). Re-synced on focus/visibility and on a slow
   // interval so proactive threads (fired reminders) show up while the app
   // stays open.
   useEffect(() => {
     function syncServerThreads() {
       void fetchServerThreads().then((serverThreads) => {
         if (!serverThreads) return;
-        const serverIds = new Set(serverThreads.map((thread) => thread.id));
+        // Threads deleted here must not come back just because the server
+        // still has them (a DELETE that hasn't landed yet); re-issue the
+        // delete instead. A thread written elsewhere *after* our delete is
+        // treated as recreated and adopted.
+        const tombstones = loadTombstones();
+        const liveServerThreads: ThreadMeta[] = [];
+        for (const thread of serverThreads) {
+          const deletedAt = tombstones[thread.id];
+          if (deletedAt !== undefined) {
+            if (thread.updatedAt > deletedAt) clearTombstone(thread.id);
+            else {
+              queueThreadDelete(thread.id);
+              continue;
+            }
+          }
+          liveServerThreads.push(thread);
+        }
+        const serverById = new Map(liveServerThreads.map((thread) => [thread.id, thread]));
+        // Reconciliation: the server should never stay behind a local copy.
+        // Index updatedAt mirrors the local chat's write stamp, so a cheap
+        // meta comparison decides whether the (potentially large) local copy
+        // even needs to be parsed. Busy threads are skipped - their stream
+        // persistence is already writing through the queue.
         for (const thread of indexRef.current.threads) {
-          if (serverIds.has(thread.id)) continue;
+          if (busyIdsRef.current.has(thread.id)) continue;
+          const server = serverById.get(thread.id);
+          if (server !== undefined && server.updatedAt >= thread.updatedAt) continue;
           const chat = loadSavedChat(thread.id);
-          if (chat?.events?.length) putThreadToServer(thread, chat);
+          if (!chat?.events?.length) continue;
+          const stamp = Math.max(thread.updatedAt, chat.savedAt ?? 0);
+          if (server !== undefined && server.updatedAt >= stamp) continue;
+          queueThreadUpsert({ ...thread, updatedAt: stamp }, chat);
         }
         setIndex((prev) => {
           const byId = new Map<string, ThreadMeta>(
-            serverThreads.map((thread) => [thread.id, thread]),
+            liveServerThreads.map((thread) => [thread.id, thread]),
           );
           for (const thread of prev.threads) {
             const existing = byId.get(thread.id);
@@ -763,7 +875,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
           needsSeenSeedRef.current = false;
           setSeenAt((prev) => {
             const seeded: Record<string, number> = {};
-            for (const thread of serverThreads) seeded[thread.id] = thread.updatedAt;
+            for (const thread of liveServerThreads) seeded[thread.id] = thread.updatedAt;
             for (const thread of indexRef.current.threads) {
               seeded[thread.id] = Math.max(seeded[thread.id] ?? 0, thread.updatedAt);
             }
@@ -772,13 +884,78 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         }
       });
     }
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") syncServerThreads();
+    }
     syncServerThreads();
     const timer = setInterval(syncServerThreads, 60_000);
     window.addEventListener("focus", syncServerThreads);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       clearInterval(timer);
       window.removeEventListener("focus", syncServerThreads);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
+  }, []);
+
+  // Cross-tab sync: storage events only fire for writes from *other* tabs,
+  // so they are exactly the signal that another tab changed the thread list
+  // or deleted a thread. (Fresher chat bodies are adopted by the mounted
+  // thread itself, which knows how far its own copy goes.)
+  useEffect(() => {
+    function onStorage(event: StorageEvent) {
+      if (event.newValue === null) return;
+      if (event.key === THREADS_KEY) {
+        let parsed: ThreadIndex;
+        try {
+          parsed = JSON.parse(event.newValue) as ThreadIndex;
+        } catch {
+          return;
+        }
+        if (!Array.isArray(parsed.threads)) return;
+        setIndex((prev) => {
+          let changed = false;
+          const byId = new Map(prev.threads.map((thread) => [thread.id, thread]));
+          for (const thread of parsed.threads) {
+            const existing = byId.get(thread.id);
+            if (existing === undefined || thread.updatedAt > existing.updatedAt) {
+              byId.set(thread.id, thread);
+              changed = true;
+            } else if (
+              thread.updatedAt === existing.updatedAt &&
+              (thread.title !== existing.title ||
+                thread.pinned !== existing.pinned ||
+                thread.renamed !== existing.renamed)
+            ) {
+              // Renames and pins deliberately keep updatedAt; adopt them too.
+              byId.set(thread.id, thread);
+              changed = true;
+            }
+          }
+          return changed ? { activeId: prev.activeId, threads: [...byId.values()] } : prev;
+        });
+      } else if (event.key === TOMBSTONES_KEY) {
+        // Another tab deleted threads; drop them here too.
+        const tombstones = loadTombstones();
+        setIndex((prev) => {
+          const threads = prev.threads.filter((thread) => {
+            const deletedAt = tombstones[thread.id];
+            return deletedAt === undefined || thread.updatedAt > deletedAt;
+          });
+          if (threads.length === prev.threads.length) return prev;
+          if (threads.length === 0) {
+            const meta = newThreadMeta();
+            return { activeId: meta.id, threads: [meta] };
+          }
+          const activeId = threads.some((thread) => thread.id === prev.activeId)
+            ? prev.activeId
+            : [...threads].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+          return { activeId, threads };
+        });
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   // Resolve the active thread's chat: localStorage first, then the server
@@ -813,10 +990,11 @@ function ChatApp({ initialView }: { initialView: MainView }) {
     void fetchServerChat(threadId).then((chat) => {
       if (cancelled) return;
       refreshedRef.current = refreshKey;
+      // Event logs only grow, so "not strictly more events than the local
+      // copy" means the server has nothing we don't (often our own PUT is
+      // simply still in flight). Never replace existing local content with a
+      // shorter copy - and never with an empty one when the fetch failed.
       if (local !== null && (chat?.events?.length ?? 0) <= (local.events?.length ?? 0)) {
-        // The server copy isn't ahead of ours (often our own PUT still in
-        // flight). Re-stamp the local copy as fresh so we stop probing.
-        saveLocalChat(threadId, local);
         return;
       }
       if (chat) saveLocalChat(threadId, chat);
@@ -831,10 +1009,48 @@ function ChatApp({ initialView }: { initialView: MainView }) {
     };
   }, [index, busyIds]);
 
+  /**
+   * The one write path for chat content. Event logs only grow, so a persist
+   * carrying fewer events than the stored copy is by definition stale (e.g.
+   * a flush from a mount that another tab has advanced past) and is dropped
+   * whole - the server applies the same rule. Accepted writes are stamped
+   * with a per-thread monotonic timestamp used consistently in three places
+   * (the local copy's savedAt, the thread meta's updatedAt, the server row)
+   * so recency comparisons hold across tabs and devices regardless of clock
+   * skew. The persisted copy is compacted (huge inline data URLs stripped)
+   * so neither the localStorage quota nor the server's body limit can
+   * reject it, and the server write rides the retrying per-thread queue.
+   */
   function persistChat(threadId: string, chat: SavedChat) {
-    saveLocalChat(threadId, chat);
+    const existing = loadSavedChat(threadId);
+    if (existing !== null && (existing.events?.length ?? 0) > (chat.events?.length ?? 0)) {
+      return;
+    }
     const meta = indexRef.current.threads.find((thread) => thread.id === threadId);
-    if (meta) putThreadToServer(meta, chat);
+    const savedAt = Math.max(Date.now(), (meta?.updatedAt ?? 0) + 1);
+    const compacted = compactChatForStorage({ ...chat, savedAt });
+    saveLocalChat(threadId, compacted);
+    if (!meta) return;
+    setIndex((prev) => ({
+      ...prev,
+      threads: prev.threads.map((thread) =>
+        thread.id === threadId ? { ...thread, updatedAt: savedAt } : thread,
+      ),
+    }));
+    queueThreadUpsert({ ...meta, updatedAt: savedAt }, compacted);
+  }
+
+  /**
+   * Another tab wrote a fresher copy of the active thread (reported by its
+   * mounted ChatThread, which knows how far its own event log goes): remount
+   * with the fuller copy. No re-persist here - the copy came *from* storage.
+   */
+  function adoptExternalChat(threadId: string, chat: SavedChat) {
+    setActiveChat((prev) =>
+      prev?.threadId === threadId
+        ? { threadId, chat, revision: (prev.revision ?? 0) + 1 }
+        : prev,
+    );
   }
 
   /**
@@ -895,11 +1111,13 @@ function ChatApp({ initialView }: { initialView: MainView }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Back/forward between "/" and "/manage" (we navigate with pushState so the
-  // app, and especially the sidebar, never remounts).
+  // Back/forward between "/", "/manage", and "/email", plus the desktop
+  // panel's open state (we navigate with pushState so the app, and especially
+  // the sidebar, never remounts).
   useEffect(() => {
     function onPopState() {
-      setView(window.location.pathname === "/manage" ? "manage" : "chat");
+      setView(viewForPath(window.location.pathname));
+      setDesktopOpen(desktopOpenFromLocation());
     }
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -909,16 +1127,28 @@ function ChatApp({ initialView }: { initialView: MainView }) {
 
   function showView(next: MainView) {
     setView(next);
-    const path = next === "manage" ? "/manage" : "/";
+    const path = pathForView(next);
     if (window.location.pathname !== path) {
-      window.history.pushState(null, "", path);
+      // Keep the query string: the desktop panel stays open across the switch.
+      window.history.pushState(null, "", path + window.location.search);
     }
+  }
+
+  /** Open or close the desktop panel, recording it in the URL. */
+  function showDesktop(open: boolean) {
+    setDesktopOpen(open);
+    const url = new URL(window.location.href);
+    if (url.searchParams.has(DESKTOP_PARAM) === open) return;
+    if (open) url.searchParams.set(DESKTOP_PARAM, "1");
+    else url.searchParams.delete(DESKTOP_PARAM);
+    window.history.pushState(null, "", url.pathname + url.search);
   }
 
   function newThread() {
     const meta = newThreadMeta();
-    // Seed the local chat so the new thread renders without a server probe.
-    saveLocalChat(meta.id, {});
+    // Seed the local chat (stamped current) so the new thread renders
+    // without a server probe.
+    saveLocalChat(meta.id, { savedAt: meta.updatedAt });
     setPendingDraft(null);
     setIndex((prev) => ({ activeId: meta.id, threads: [meta, ...prev.threads] }));
     setSidebarOpen(false);
@@ -937,15 +1167,16 @@ function ChatApp({ initialView }: { initialView: MainView }) {
     const source = indexRef.current.threads.find(
       (thread) => thread.id === indexRef.current.activeId,
     );
+    const base = newThreadMeta();
     const meta: ThreadMeta = {
-      ...newThreadMeta(),
+      ...base,
       title: source ? `Fork: ${source.title}`.slice(0, 80) : "Forked thread",
       // Protect the fork title from the auto-titling backfill.
       renamed: true,
     };
-    const saved: SavedChat = { ...chat, savedAt: Date.now() };
+    const saved = compactChatForStorage({ ...chat, savedAt: meta.updatedAt });
     saveLocalChat(meta.id, saved);
-    putThreadToServer(meta, saved);
+    queueThreadUpsert(meta, saved);
     setPendingDraft(draft !== undefined ? { threadId: meta.id, text: draft } : null);
     setIndex((prev) => ({ activeId: meta.id, threads: [meta, ...prev.threads] }));
     setSidebarOpen(false);
@@ -957,7 +1188,11 @@ function ChatApp({ initialView }: { initialView: MainView }) {
     } catch {
       // Ignore storage failures.
     }
-    deleteThreadOnServer(id);
+    saveDraft(id, "");
+    // The tombstone keeps the periodic sync (and other tabs) from
+    // resurrecting the thread while the server DELETE retries.
+    recordTombstone(id);
+    queueThreadDelete(id);
     setIndex((prev) => {
       const remaining = prev.threads.filter((thread) => thread.id !== id);
       if (remaining.length === 0) {
@@ -990,7 +1225,9 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         thread.id === id
           ? {
               ...thread,
-              updatedAt: Date.now(),
+              // Monotonic, like persistChat's stamps, so activity can never
+              // move a thread's clock backwards.
+              updatedAt: Math.max(Date.now(), thread.updatedAt + 1),
               ...(title && !thread.renamed ? { title } : {}),
             }
           : thread,
@@ -1009,7 +1246,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
       ...prev,
       threads: prev.threads.map((thread) => (thread.id === id ? meta : thread)),
     }));
-    putThreadMetaToServer(meta);
+    queueThreadUpsert(meta);
   }
 
   function togglePin(id: string) {
@@ -1021,7 +1258,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
       ...prev,
       threads: prev.threads.map((thread) => (thread.id === id ? meta : thread)),
     }));
-    putThreadMetaToServer(meta);
+    queueThreadUpsert(meta);
   }
 
   function setThreadBusy(id: string, busy: boolean) {
@@ -1035,7 +1272,14 @@ function ChatApp({ initialView }: { initialView: MainView }) {
   }
 
   return (
-    <div className="flex h-dvh w-full">
+    <div
+      className={cn(
+        "flex h-dvh w-full",
+        // Give the desktop panel its own space instead of covering what is on
+        // screen, once the window is wide enough to spare it.
+        desktopOpen && "lg:pe-[36rem]",
+      )}
+    >
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
@@ -1079,6 +1323,34 @@ function ChatApp({ initialView }: { initialView: MainView }) {
                 }
                 className={cn(push.status !== "on" && "text-kumo-subtle")}
                 onClick={push.toggle}
+              />
+            )}
+            {features.email && (
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={EnvelopeIcon}
+                aria-label="Email"
+                aria-pressed={view === "email"}
+                title={`Email: ${AGENT_NAME}'s own inbox`}
+                className={cn(view === "email" && "bg-kumo-tint text-kumo-strong")}
+                onClick={() => showView(view === "email" ? "chat" : "email")}
+              />
+            )}
+            {hasDesktop && (
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={MonitorIcon}
+                aria-label={`${AGENT_NAME}'s desktop`}
+                aria-pressed={desktopOpen}
+                title={`${AGENT_NAME}'s desktop: watch her cloud computer live`}
+                className={cn(
+                  desktopOpen ? "bg-kumo-tint text-kumo-strong" : "text-kumo-subtle",
+                )}
+                onClick={() => showDesktop(!desktopOpen)}
               />
             )}
             <Button
@@ -1192,6 +1464,8 @@ function ChatApp({ initialView }: { initialView: MainView }) {
             <ManagePanel onOpenThread={selectThread} />
           </div>
         </main>
+      ) : view === "email" ? (
+        <EmailClient onOpenSidebar={() => setSidebarOpen(true)} />
       ) : activeChat && activeChat.threadId === index.activeId ? (
         <ChatThread
           key={`${index.activeId}:${activeChat.revision ?? 0}`}
@@ -1210,6 +1484,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
           model={model}
           models={models}
           onModelChange={selectModel}
+          onRefreshModels={refreshModels}
           reasoning={reasoning}
           onReasoningChange={selectReasoning}
           allowResume={
@@ -1217,12 +1492,17 @@ function ChatApp({ initialView }: { initialView: MainView }) {
             (activeChat.chat.events?.length ?? 0)
           }
           onResumed={(chat) => adoptResumedChat(index.activeId, chat)}
+          onExternalUpdate={(chat) => adoptExternalChat(index.activeId, chat)}
+          onWatchDesktop={() => showDesktop(true)}
+          hasDesktop={hasDesktop}
         />
       ) : (
         <main className="flex h-dvh min-w-0 flex-1 items-center justify-center text-kumo-subtle">
           <Loader size={20} />
         </main>
       )}
+
+      {desktopOpen && <DesktopDrawer onClose={() => showDesktop(false)} />}
 
       <CommandPalette
         open={commandPaletteOpen}
@@ -1233,6 +1513,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         onSelectThread={selectThread}
         onNewChat={newThread}
         onOpenManage={() => showView("manage")}
+        onOpenEmail={features.email ? () => showView("email") : undefined}
         pushStatus={push.status}
         onTogglePush={push.toggle}
       />
@@ -1365,6 +1646,12 @@ function SidebarThread({
               aria-label="Started by a webhook"
             />
           )}
+          {thread.origin === "email" && (
+            <EnvelopeIcon
+              className="ms-1.5 size-3 shrink-0 text-kumo-subtle"
+              aria-label="Started by an incoming email"
+            />
+          )}
         </span>
         <span className="block text-xs text-kumo-subtle">
           {formatThreadDate(thread.updatedAt)}
@@ -1401,7 +1688,7 @@ function SidebarThread({
 }
 
 function ChatThread({
-  threadId: _threadId,
+  threadId,
   initialChat,
   initialDraft,
   onTitle,
@@ -1414,10 +1701,14 @@ function ChatThread({
   model,
   models,
   onModelChange,
+  onRefreshModels,
   reasoning,
   onReasoningChange,
   allowResume,
   onResumed,
+  onExternalUpdate,
+  onWatchDesktop,
+  hasDesktop,
 }: {
   threadId: string;
   initialChat: SavedChat;
@@ -1434,15 +1725,31 @@ function ChatThread({
   model: string;
   models: ModelOption[];
   onModelChange: (id: string) => void;
+  /** Re-fetch the Gateway catalog when the picker opens. */
+  onRefreshModels: () => void;
   reasoning: ReasoningId;
   onReasoningChange: (id: ReasoningId) => void;
   /** Gate on the interrupted-turn stream reattach (one attempt per visit). */
   allowResume: boolean;
   /** A reattached stream settled; remount me with the merged chat. */
   onResumed: (chat: SavedChat) => void;
+  /** Another tab wrote a fresher copy of this thread; remount me with it. */
+  onExternalUpdate: (chat: SavedChat) => void;
+  /** Opens the live view of the cloud desktop, shared with the app header. */
+  onWatchDesktop: () => void;
+  /** Whether this deployment has a cloud desktop; gates the composer toggle. */
+  hasDesktop: boolean;
 }) {
-  const [draft, setDraft] = useState(initialDraft ?? "");
+  // Drafts survive reloads and remounts (fork prefills take precedence).
+  const [draft, setDraft] = useState(() => initialDraft ?? loadDraft(threadId));
+  useEffect(() => {
+    saveDraft(threadId, draft);
+  }, [threadId, draft]);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Composer toggle: steer this thread's work onto the cloud desktop. Off
+  // means "agent's choice", not "don't use the computer" - the flag only
+  // rides along while it is on.
+  const [useComputer, setUseComputer] = useState(false);
   // One-turn transcript context for threads forked from a message: eve
   // sessions are append-only, so the fork starts a fresh session and this
   // rides along on its first send only.
@@ -1465,13 +1772,27 @@ function ChatThread({
   const speechSupported = useMemo(() => getSpeechRecognition() !== null, []);
 
   // Interrupted-turn recovery: when the saved chat ends mid-turn (the user
-  // switched threads or reloaded while the agent was replying), reattach to
-  // the durable session's stream and catch up live. null means no reattach;
-  // an array collects the replayed/live events until the turn settles.
+  // switched threads or reloaded while the agent was replying) or is marked
+  // behind the durable log (a tail probe found more events after the view
+  // was gone), reattach to the durable session's stream and catch up live.
+  // null means no reattach; an array collects the replayed/live events until
+  // the stream reaches the session's verified tail (see the effect below).
+  // The same machinery re-runs after a send whose replay turned out to be an
+  // old turn (the mismatch detection in onEvent) - resumeBaseRef carries the
+  // events the catch-up starts from.
   const [resumedEvents, setResumedEvents] = useState<readonly HandleMessageStreamEvent[] | null>(
-    () => (allowResume && isInterruptedChat(initialChat) ? [] : null),
+    () =>
+      allowResume && (isInterruptedChat(initialChat) || initialChat.behind === true) ? [] : null,
   );
   const resuming = resumedEvents !== null;
+  const resumeBaseRef = useRef<readonly HandleMessageStreamEvent[]>(initialChat.events ?? []);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Mirror of the authoritative stream, kept by the store callbacks rather
   // than render effects so persistence keeps working after this component
@@ -1482,16 +1803,58 @@ function ChatThread({
     timer: ReturnType<typeof setTimeout> | undefined;
   }>({ events: [...(initialChat.events ?? [])], session: initialChat.session, timer: undefined });
 
+  // The session handle is created here (not owned by the store) so its state
+  // is readable from stream callbacks: the session id appears on it the
+  // moment a send is accepted, long before the turn ends. Without it, saves
+  // from a turn running after unmount carried no session id, leaving an
+  // interrupted chat unresumable - the reply was lost for good. The cursor
+  // is re-derived from the saved events so a mixed save can't make the next
+  // send replay an old turn (see normalizedSavedSession).
+  const sessionRef = useRef<ClientSession | null>(null);
+  if (sessionRef.current === null) {
+    sessionRef.current = new Client({ host: "" }).session(normalizedSavedSession(initialChat));
+  }
+
   function persistLive() {
     const live = liveRef.current;
+    const sessionState = sessionRef.current?.state;
+    if (sessionState?.sessionId !== undefined) live.session = sessionState;
     clearTimeout(live.timer);
     live.timer = undefined;
     onPersist({ events: [...live.events], session: live.session });
   }
 
+  // A send's response stream replays the session log from this copy's cursor
+  // and stops at the first turn boundary. When the copy is behind the true
+  // log (turns ran that no client wrote back - another device, a stale
+  // restore), that replayed turn is an *old* one and the just-sent message
+  // sits further down the stream, invisible. The echo of the user message
+  // exposes this: when it isn't the message that was just sent, a catch-up
+  // read follows the stream to the session's verified tail, which by
+  // definition includes the sent exchange, so nothing stays hidden.
+  const pendingSendTextRef = useRef<string | null>(null);
+  const sendReplayMismatchRef = useRef(false);
+  const resumingRef = useRef(resuming);
+  resumingRef.current = resuming;
+  const agentBusyRef = useRef(false);
+  // Set when a catch-up starts because the copy is *known* stale (a replay
+  // mismatch or a tail probe) while the stored copy carries no mark of it:
+  // if the catch-up is aborted before anything arrives, the abort path must
+  // write the behind mark or the staleness knowledge dies with this mount.
+  // Mount-triggered reattaches don't need it - their stored copy already
+  // reattaches by itself (interrupted tail or an existing behind mark).
+  const resumeNeedsBehindMarkRef = useRef(false);
+
+  function startCatchUp() {
+    if (!mountedRef.current || resumingRef.current || agentBusyRef.current) return;
+    resumeBaseRef.current = [...liveRef.current.events];
+    resumeNeedsBehindMarkRef.current = true;
+    setResumedEvents([]);
+  }
+
   const agent = useEveAgent({
+    session: sessionRef.current,
     initialEvents: initialChat.events ?? [],
-    initialSession: initialChat.session,
     // Ride the selected gateway model (and reasoning effort, when set) along
     // with every turn; the agent's dynamic model resolver reads them from the
     // turn's client context. clientTime gives the agent the exact minute
@@ -1499,6 +1862,23 @@ function ChatThread({
     // turn). Forked threads also carry their source transcript on the first
     // turn.
     prepareSend: (input) => {
+      // Answering an approval or a question sends only inputResponses. The
+      // channel delivers clientContext as a user-role message, so attaching it
+      // to a send with no message of its own puts a text-free turn in front of
+      // the agent, which it then remarks on ("your message came through
+      // empty"). The marker from the previous turn is still in the transcript,
+      // so the model selection survives being left off here.
+      if (input.message === undefined) return input;
+
+      pendingSendTextRef.current =
+        typeof input.message === "string"
+          ? input.message.trim()
+          : input.message
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("\n")
+              .trim();
+
       const forkedThreadTranscript = forkContextRef.current;
       forkContextRef.current = undefined;
       return {
@@ -1506,6 +1886,9 @@ function ChatThread({
         clientContext: {
           eveWebModel: model,
           ...(reasoning !== "default" ? { eveWebReasoning: reasoning } : {}),
+          // The composer's computer toggle: the desktop instructions tell the
+          // agent this flag means "do this on your cloud desktop".
+          ...(useComputer ? { eveWebUseComputer: true } : {}),
           clientTime: new Date().toLocaleString("en-CA", {
             year: "numeric",
             month: "short",
@@ -1519,13 +1902,24 @@ function ChatThread({
       };
     },
     // Persist through the turn so an interruption (thread switch, reload)
-    // never loses the conversation: immediately when the user message lands
-    // and at the turn boundary, debounced between deltas. Runs even after
-    // unmount, so a backgrounded turn keeps writing through to storage.
+    // never loses the conversation: immediately when the user message lands,
+    // debounced between deltas, and settled in onFinish. The turn-boundary
+    // event itself deliberately does not persist: the session cursor only
+    // advances right after it, and a copy saved in that gap (settled events,
+    // pre-turn cursor) reads as current to other tabs while pointing their
+    // next send at an old turn. Runs even after unmount, so a backgrounded
+    // turn keeps writing through to storage.
     onEvent(event) {
       const live = liveRef.current;
       live.events.push(event);
-      if (event.type === "message.received" || isCurrentTurnBoundaryEvent(event)) {
+      if (event.type === "message.received") {
+        const expected = pendingSendTextRef.current;
+        pendingSendTextRef.current = null;
+        // Full equality against the echoed text parts: an older message that
+        // merely contains the sent text must still read as a mismatch.
+        if (expected !== null && expected.length > 0 && messageEchoText(event) !== expected) {
+          sendReplayMismatchRef.current = true;
+        }
         persistLive();
       } else {
         clearTimeout(live.timer);
@@ -1535,22 +1929,74 @@ function ChatThread({
       // mounted case is handled by the isBusy effect below.
       if (isCurrentTurnBoundaryEvent(event)) onBusyChange(false);
     },
-    // Fires at turn boundaries; keeps the mirror's cursor fresh for the
-    // final flush even when this component is already unmounted.
+    // Fires at turn boundaries with the advanced cursor (continuation token,
+    // stream index); keeps the mirror fresh for the final flush even when
+    // this component is already unmounted.
     onSessionChange(session) {
       liveRef.current.session = session;
     },
-    onFinish(snapshot) {
-      onPersist({ events: snapshot.events, session: snapshot.session });
-      onActivity();
+    // Runs after onSessionChange, so this persist carries the settled events
+    // together with the advanced cursor, and its updatedAt bump (stamped by
+    // persistChat) makes completion visible to other tabs and devices.
+    onFinish() {
+      persistLive();
+      // The turn that just settled was a replay of an older turn, not the
+      // send: catch up to the session's tail to surface the real exchange.
+      if (sendReplayMismatchRef.current) {
+        sendReplayMismatchRef.current = false;
+        if (mountedRef.current) {
+          startCatchUp();
+        } else {
+          // The mismatch is proof the sent turn sits further down the durable
+          // log, but the view is gone (the user navigated away while the
+          // replayed turn settled), so startCatchUp would no-op and drop the
+          // recovery. Mirror the probe branch: mark the saved copy behind so
+          // the next mount reattaches and reads to the verified tail.
+          onPersist({
+            events: [...liveRef.current.events],
+            session: liveRef.current.session,
+            behind: true,
+          });
+        }
+        return;
+      }
+      // Text can't flag every stale replay - an old turn with identical
+      // text echoes back indistinguishably - so verify against the durable
+      // log itself: after a settled turn the cursor should sit at the tail,
+      // and an event existing at that index means turns are still hidden.
+      // One background probe per settled turn; it answers in milliseconds
+      // when behind and costs only its deadline when current.
+      const settledSession = sessionRef.current?.state;
+      if (settledSession?.sessionId !== undefined) {
+        void sessionHasEventAt(settledSession.sessionId, settledSession.streamIndex).then(
+          (hasMore) => {
+            if (!hasMore) return;
+            if (mountedRef.current) {
+              // No-op while a newer turn or reattach runs; those re-check
+              // the tail when they settle.
+              startCatchUp();
+              return;
+            }
+            // The view is gone (the user navigated away while the probe was
+            // in flight), so the discovery must outlive this component: mark
+            // the saved copy as behind. It ends at a clean boundary and
+            // would otherwise look settled; the flag makes the next mount
+            // reattach and read to the verified tail.
+            onPersist({
+              events: [...liveRef.current.events],
+              session: liveRef.current.session,
+              behind: true,
+            });
+          },
+        );
+      }
     },
   });
 
-  // The store only reports the session cursor at turn boundaries, so mirror
-  // it from the snapshot on every render and flush once the sessionId first
-  // exists (right after the first stream event). A mid-turn save without the
-  // sessionId would be unrecoverable - reattaching needs the id.
-  if (agent.session.sessionId !== undefined) liveRef.current.session = agent.session;
+  // Flush a save the moment the session id first exists: from then on an
+  // interrupted copy is resumable. (persistLive itself mirrors the id from
+  // the session handle, so mid-turn saves carry it even after unmount; this
+  // effect just makes sure a save happens promptly.)
   const persistedSessionId = useRef<string | undefined>(initialChat.session?.sessionId);
   useEffect(() => {
     const sessionId = agent.session.sessionId;
@@ -1560,59 +2006,111 @@ function ChatThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.session.sessionId]);
 
-  // Reattach to an interrupted turn: replay the session stream from the
-  // events we already have, render and persist as it advances, and settle at
-  // the turn boundary (or a human-input park, which the normal composer path
-  // handles after the remount that onResumed triggers).
+  // localStorage writes are synchronous, so flushing the debounced mid-turn
+  // save when the page hides or unloads means a reload can only ever lose
+  // events that hadn't arrived yet - never the tail of what already streamed.
+  // (The server write queue has its own keepalive unload flush.)
   useEffect(() => {
-    if (!resuming) return;
-    const controller = new AbortController();
-    const base = initialChat.events ?? [];
-    const collected: HandleMessageStreamEvent[] = [];
-    let persistTimer: ReturnType<typeof setTimeout> | undefined;
-    (async () => {
-      const client = new Client({ host: window.location.origin });
-      const session = client.session(initialChat.session);
-      try {
-        for await (const event of session.stream({
-          startIndex: base.length,
-          signal: controller.signal,
-        })) {
-          collected.push(event);
-          setResumedEvents([...collected]);
-          clearTimeout(persistTimer);
-          persistTimer = setTimeout(() => {
-            onPersist({ events: [...base, ...collected], session: session.state });
-          }, 800);
-          if (
-            isCurrentTurnBoundaryEvent(event) ||
-            event.type === "input.requested" ||
-            event.type === "authorization.required"
-          ) {
-            break;
-          }
-        }
-      } catch {
-        // Stream unavailable (network, pruned session): settle with what we
-        // have; the attempt guard keeps this from looping.
-      }
-      if (controller.signal.aborted) return;
-      clearTimeout(persistTimer);
-      onBusyChange(false);
-      onActivity();
-      onResumed({ events: [...base, ...collected], session: session.state });
-    })();
+    function flushPending() {
+      if (liveRef.current.timer !== undefined) persistLive();
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === "hidden") flushPending();
+    }
+    window.addEventListener("pagehide", flushPending);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      controller.abort();
-      clearTimeout(persistTimer);
+      window.removeEventListener("pagehide", flushPending);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Catch up with the durable session's stream: replay from the events we
+  // already have, render and persist as it advances, and settle once the
+  // stream reaches the session's *verified* tail - each turn boundary is
+  // checked against the durable log with a fresh probe (sessionHasEventAt),
+  // never guessed from timing or message text. Human-input parks settle
+  // immediately; the composer answers those after the remount that
+  // onResumed triggers. Runs for interrupted saved chats at mount and again
+  // whenever a send's replay reveals the copy was behind (startCatchUp).
+  useEffect(() => {
+    if (!resuming) return;
+    const controller = new AbortController();
+    const base = resumeBaseRef.current;
+    // Whether an empty-handed abort must still write the behind mark (the
+    // copy is known stale but its stored form looks settled).
+    const needsBehindOnAbort = resumeNeedsBehindMarkRef.current;
+    const collected: HandleMessageStreamEvent[] = [];
+    let persistTimer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    let settled = false;
+    const client = new Client({ host: window.location.origin });
+    const session = client.session(sessionRef.current?.state ?? normalizedSavedSession(initialChat));
+    const sessionId = session.state.sessionId;
+    (async () => {
+      let stop: CatchUpStop | "failed" = "failed";
+      try {
+        stop = await readCatchUpStream(
+          session.stream({ startIndex: base.length, signal: controller.signal }),
+          (consumedCount) =>
+            sessionId === undefined
+              ? Promise.resolve(false)
+              : sessionHasEventAt(sessionId, base.length + consumedCount),
+          (event) => {
+            collected.push(event);
+            setResumedEvents([...collected]);
+            clearTimeout(persistTimer);
+            persistTimer = setTimeout(() => {
+              // Mid-catch-up saves are by definition unverified; the mark
+              // survives even a process death right after a clean boundary.
+              onPersist({ events: [...base, ...collected], session: session.state, behind: true });
+            }, 800);
+          },
+        );
+      } catch {
+        // Stream unavailable (network, pruned session): settle with what we
+        // have; the attempt guard keeps this from looping.
+      }
+      if (cancelled) return;
+      clearTimeout(persistTimer);
+      settled = true;
+      onBusyChange(false);
+      onActivity();
+      // Only a verified stop - the probed tail or a human-input park - may
+      // present the copy as settled. A failure or a transport that gave up
+      // can leave the copy ending at a clean old boundary with the log
+      // continuing past it; the behind mark makes the next visit reattach
+      // and finish the job instead of trusting that boundary.
+      const verified = stop === "tail" || stop === "park";
+      onResumed({
+        events: [...base, ...collected],
+        session: session.state,
+        ...(verified ? {} : { behind: true }),
+      });
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(persistTimer);
+      // Keep whatever the reattach collected: navigating away mid-catch-up
+      // must not drop events that were already replayed to this tab, and
+      // the tail was not verified, so the behind mark must survive too.
+      // Even an empty-handed abort persists when this catch-up is what knew
+      // the copy was stale - otherwise a clean-boundary copy would read as
+      // settled on the next mount and the backlog would stay hidden. (A
+      // settled resume already persisted through onResumed.)
+      if (!settled && (collected.length > 0 || needsBehindOnAbort)) {
+        onPersist({ events: [...base, ...collected], session: session.state, behind: true });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resuming]);
+
   // While reattached, render the merged log through the same reducer the
   // agent store uses, so the view is indistinguishable from a live turn.
   const events = useMemo(
-    () => (resumedEvents === null ? agent.events : [...(initialChat.events ?? []), ...resumedEvents]),
+    () => (resumedEvents === null ? agent.events : [...resumeBaseRef.current, ...resumedEvents]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [agent.events, resumedEvents],
   );
@@ -1634,6 +2132,9 @@ function ChatThread({
   }, []);
 
   const isBusy = resuming || agent.status === "submitted" || agent.status === "streaming";
+  // Post-turn probes must not start a catch-up while a newer turn already
+  // runs; that turn's own settle re-checks the tail.
+  agentBusyRef.current = agent.status === "submitted" || agent.status === "streaming";
 
   // Report turn activity up so the sidebar can dot busy threads. Deliberately
   // not cleared on unmount: a turn keeps running server-side when the user
@@ -1642,6 +2143,29 @@ function ChatThread({
     onBusyChange(isBusy);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBusy]);
+
+  // Live cross-tab updates: storage events fire only for writes from other
+  // tabs, so a fresher copy under this thread's key means another tab (or a
+  // turn backgrounded there) advanced the conversation. Adopt it unless this
+  // tab is itself streaming - its own store is the authority then.
+  useEffect(() => {
+    if (isBusy) return;
+    function onStorage(event: StorageEvent) {
+      if (event.key !== chatKey(threadId) || event.newValue === null) return;
+      let parsed: SavedChat;
+      try {
+        parsed = JSON.parse(event.newValue) as SavedChat;
+      } catch {
+        return;
+      }
+      if ((parsed.events?.length ?? 0) > liveRef.current.events.length) {
+        onExternalUpdate(parsed);
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBusy, threadId]);
 
   // Per-turn cost/token totals from step.completed events, keyed by turnId so
   // each assistant reply can show what it cost.
@@ -1788,8 +2312,11 @@ function ChatThread({
 
   async function stopTurn() {
     // During a reattached turn the agent store is idle; the session id from
-    // the saved cursor targets the running turn instead.
-    const sessionId = agent.session?.sessionId ?? initialChat.session?.sessionId;
+    // the shared handle (or the saved cursor) targets the running turn.
+    const sessionId =
+      agent.session?.sessionId ??
+      sessionRef.current?.state.sessionId ??
+      initialChat.session?.sessionId;
     agent.stop();
     if (sessionId) {
       await fetch(`/eve/v1/session/${sessionId}/cancel`, { method: "POST" }).catch(() => undefined);
@@ -1958,6 +2485,7 @@ function ChatThread({
                       onRegenerate={regenerateLastReply}
                       onFork={forkFromMessage}
                       onRespond={respondToInput}
+                      onWatchDesktop={onWatchDesktop}
                     />
                   </MessageScrollerItem>
                 ))}
@@ -2129,8 +2657,32 @@ function ChatThread({
                 onClick={() => fileInputRef.current?.click()}
               />
               <div className="ms-auto flex items-center gap-1">
+                {hasDesktop && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    shape="square"
+                    icon={MonitorIcon}
+                    aria-label="Do this on the computer"
+                    aria-pressed={useComputer}
+                    title={
+                      useComputer
+                        ? `${AGENT_NAME} will do this on her computer - click to leave the choice to her`
+                        : `Have ${AGENT_NAME} do this on her computer`
+                    }
+                    className={cn(
+                      useComputer ? "bg-kumo-tint !text-kumo-strong" : "text-kumo-subtle",
+                    )}
+                    onClick={() => setUseComputer((value) => !value)}
+                  />
+                )}
                 <ReasoningPicker reasoning={reasoning} onSelect={onReasoningChange} />
-                <ModelPicker model={model} models={models} onSelect={onModelChange} />
+                <ModelPicker
+                  model={model}
+                  models={models}
+                  onSelect={onModelChange}
+                  onOpen={onRefreshModels}
+                />
                 {speechSupported && (
                   <Button
                     type="button"
@@ -2176,6 +2728,45 @@ function ChatThread({
         </footer>
       </div>
     </main>
+  );
+}
+
+/**
+ * Side panel holding the live desktop. Deliberately not a modal: the point is
+ * to watch the agent work while the conversation carries on next to it.
+ */
+function DesktopDrawer({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" aria-hidden onClick={onClose} />
+      <aside
+        aria-label={`${AGENT_NAME}'s desktop`}
+        className="fixed inset-y-0 end-0 z-50 flex w-full max-w-xl flex-col gap-3 border-s border-kumo-hairline bg-kumo-elevated p-4 shadow-xl"
+      >
+        <div className="flex items-center gap-2">
+          <MonitorIcon className="size-4" />
+          <h2 className="text-sm font-medium">{AGENT_NAME}&rsquo;s desktop</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={XIcon}
+            aria-label="Close desktop"
+            className="ms-auto"
+            onClick={onClose}
+          />
+        </div>
+        <ComputerViewer />
+      </aside>
+    </>
   );
 }
 
@@ -2276,10 +2867,13 @@ function ModelPicker({
   model,
   models,
   onSelect,
+  onOpen,
 }: {
   model: string;
   models: ModelOption[];
   onSelect: (id: string) => void;
+  /** Pull a fresh Gateway catalog each time the menu opens. */
+  onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -2337,7 +2931,11 @@ function ModelPicker({
         aria-expanded={open}
         className="max-w-40 text-kumo-subtle hover:text-kumo-default"
         onClick={() => {
-          setOpen((prev) => !prev);
+          setOpen((prev) => {
+            const next = !prev;
+            if (next) onOpen?.();
+            return next;
+          });
           setQuery("");
         }}
       >
@@ -2419,6 +3017,7 @@ function ModelPicker({
               {filtered.map((option) => {
                 const tier = priceTier(option.pricing);
                 const starred = favorites.includes(option.id);
+                const recent = isNewModel(option.released);
                 return (
                   <div
                     key={option.id}
@@ -2436,6 +3035,11 @@ function ModelPicker({
                     >
                       <span className="flex items-center gap-1.5">
                         <span className="truncate text-sm font-medium">{option.name}</span>
+                        {recent && (
+                          <span className="shrink-0 text-[11px] font-medium text-kumo-strong">
+                            New
+                          </span>
+                        )}
                         {tier && (
                           <span className="shrink-0 text-[11px] text-kumo-subtle">{tier}</span>
                         )}
@@ -2481,6 +3085,7 @@ function ChatMessage({
   onRegenerate,
   onFork,
   onRespond,
+  onWatchDesktop,
 }: {
   message: EveMessage;
   usage?: TurnUsage;
@@ -2492,6 +3097,7 @@ function ChatMessage({
   onRegenerate: () => void;
   onFork: (message: EveMessage, includeTurn: boolean, draft?: string) => void;
   onRespond: (requestId: string, optionId: string) => void;
+  onWatchDesktop: () => void;
 }) {
   const align = message.role === "user" ? "end" : "start";
   const text = messageText(message);
@@ -2503,7 +3109,13 @@ function ChatMessage({
     <Message align={align}>
       <MessageContent className="gap-2">
         {message.parts.map((part, index) => (
-          <ChatPart key={index} part={part} role={message.role} onRespond={onRespond} />
+          <ChatPart
+            key={index}
+            part={part}
+            role={message.role}
+            onRespond={onRespond}
+            onWatchDesktop={onWatchDesktop}
+          />
         ))}
         {message.role === "assistant" && text.length > 0 && (
           <div className={cn(actionRowClass, !assistantDone && "invisible")}>
@@ -2582,10 +3194,12 @@ function ChatPart({
   part,
   role,
   onRespond,
+  onWatchDesktop,
 }: {
   part: EveMessagePart;
   role: "assistant" | "user";
   onRespond: (requestId: string, optionId: string) => void;
+  onWatchDesktop: () => void;
 }) {
   switch (part.type) {
     case "text": {
@@ -2620,7 +3234,11 @@ function ChatPart({
         </details>
       );
 
-    case "file":
+    case "file": {
+      // Oversized inline payloads are stripped from the persisted transcript
+      // (see compactChatForStorage); render those as a plain chip instead of
+      // a link to a stub URL.
+      const strippedFile = typeof part.url === "string" && isStrippedUrl(part.url);
       return (
         <Attachment size="sm" className="w-fit max-w-full">
           <AttachmentMedia>
@@ -2630,7 +3248,7 @@ function ChatPart({
             <AttachmentTitle>{part.filename ?? "Attachment"}</AttachmentTitle>
             <AttachmentDescription>{part.mediaType}</AttachmentDescription>
           </AttachmentContent>
-          {part.url && (
+          {part.url && !strippedFile && (
             <AttachmentTrigger
               render={
                 <a
@@ -2644,12 +3262,17 @@ function ChatPart({
           )}
         </Attachment>
       );
+    }
 
     case "dynamic-tool": {
       const request = part.toolMetadata?.eve?.inputRequest;
       const label = part.toolName.replaceAll("_", " ");
       const running = part.state === "input-streaming" || part.state === "input-available";
       const expandable = part.input !== undefined || part.state === "output-available";
+      // Screenshot tools (browser__screenshot, computer_screenshot) hand back
+      // an inline image meant for the owner's eyes, not the model's: it only
+      // exists here, so render it or nobody ever sees it.
+      const image = part.state === "output-available" ? outputImageDataUrl(part.output) : null;
 
       const marker = (
         <Marker role={running ? "status" : undefined}>
@@ -2670,20 +3293,37 @@ function ChatPart({
 
       return (
         <div className="flex flex-col gap-2">
-          {expandable ? (
-            <details>
-              <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
-                {marker}
-              </summary>
-              <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
-                <ToolPayload label="Input" value={part.input} />
-                {part.state === "output-available" && (
-                  <ToolPayload label="Output" value={part.output} />
-                )}
-              </div>
-            </details>
-          ) : (
-            marker
+          <div className="flex items-start gap-1">
+            {expandable ? (
+              <details className="min-w-0">
+                <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
+                  {marker}
+                </summary>
+                <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
+                  <ToolPayload label="Input" value={part.input} />
+                  {part.state === "output-available" && (
+                    <ToolPayload label="Output" value={compactToolOutput(part.output)} />
+                  )}
+                </div>
+              </details>
+            ) : (
+              marker
+            )}
+            {/* The desktop is the one tool whose work is worth watching live. */}
+            {part.toolName.startsWith("computer_") && (
+              <Button variant="ghost" size="sm" onClick={onWatchDesktop}>
+                <MonitorIcon />
+                Watch
+              </Button>
+            )}
+          </div>
+          {image !== null && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={image}
+              alt={`${label} result`}
+              className="h-auto w-fit max-w-full rounded-lg ring ring-kumo-hairline"
+            />
           )}
           {part.state === "output-error" && (
             <Bubble variant="destructive">
