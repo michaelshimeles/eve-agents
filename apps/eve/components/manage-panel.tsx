@@ -14,6 +14,8 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
+import { CardPanel } from "@/components/card-panel";
+import { ComputerViewer } from "@/components/computer-viewer";
 import { AGENT_NAME } from "@/lib/identity";
 import { cn } from "@/lib/utils";
 
@@ -532,6 +534,11 @@ interface FeatureFlags {
   proactive: boolean;
   integrations: boolean;
   skills: boolean;
+  /** Deployment ships the desktop feature; the tab doubles as key setup, so it
+   * shows even before a key is configured. */
+  computerAvailable: boolean;
+  /** Same idea for payments: the tab is where the connection is made. */
+  cardAvailable: boolean;
 }
 
 // Personal deployments have everything; builder deployments report what they
@@ -541,6 +548,8 @@ const ALL_FEATURES_ON: FeatureFlags = {
   proactive: true,
   integrations: true,
   skills: true,
+  computerAvailable: true,
+  cardAvailable: true,
 };
 
 interface UpdateInfo {
@@ -650,6 +659,8 @@ export function ManagePanel({
       : []),
     ...(features.integrations ? [{ value: "connections", label: "Connections" }] : []),
     ...(features.skills ? [{ value: "skills", label: "Skills" }] : []),
+    ...(features.computerAvailable ? [{ value: "computer", label: "Computer" }] : []),
+    ...(features.cardAvailable ? [{ value: "card", label: "Card" }] : []),
   ];
 
   // If the active tab's feature turns out to be absent, land on the first
@@ -754,8 +765,7 @@ export function ManagePanel({
             <LoadingRow />
           ) : webhooks.length === 0 ? (
             <EmptyNote>
-              No event triggers. Ask {AGENT_NAME} to &ldquo;create a webhook for deploy
-              alerts&rdquo;.
+              No event triggers. Ask {AGENT_NAME} to “create a webhook for deploy alerts”.
             </EmptyNote>
           ) : (
             <ul className="flex flex-col">
@@ -821,6 +831,10 @@ export function ManagePanel({
         {tab === "connections" && <ConnectionsTab />}
 
         {tab === "skills" && <SkillsTab />}
+
+        {tab === "computer" && <ComputerViewer />}
+
+        {tab === "card" && <CardPanel />}
       </div>
     </div>
   );
