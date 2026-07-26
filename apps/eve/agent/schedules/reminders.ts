@@ -1,6 +1,8 @@
 import { defineSchedule } from "eve/schedules";
 
 import telegram from "../channels/telegram";
+import { notifyOwnerOverIMessage } from "../lib/effect/imessage";
+import { runTool } from "../lib/effect/runtime";
 import { ownerName } from "../lib/owner";
 import { recordAutomationRun } from "../lib/runs-db";
 import { deliverToWebChatThread } from "../lib/web-thread-delivery";
@@ -10,7 +12,9 @@ import { claimDueReminders, completeReminder, releaseReminder, type ReminderRow 
 // Fires every minute, claims due rows, and runs one proactive session per
 // reminder. Delivery follows where the reminder was created: rows with a
 // Telegram chat id reply into that DM; rows without one (web chat) run
-// against our own eve channel and land as a new web chat thread.
+// against our own eve channel and land as a new web chat thread — and, when
+// this deployment is paired with an iMessage number, the result is also
+// texted to the owner so a fired reminder reaches their phone.
 
 function reminderMessage(reminder: ReminderRow): string {
   const cadence =
@@ -37,17 +41,31 @@ export default defineSchedule({
           try {
             let threadId: string | undefined;
             if (reminder.chat_id !== null) {
+              // Telegram-origin reminders already land as a DM on the owner's
+              // phone, so no iMessage mirror is needed there.
               await receive(telegram, {
                 message: reminderMessage(reminder),
                 target: { chatId: reminder.chat_id },
                 auth: appAuth,
               });
             } else {
-              threadId = await deliverToWebChatThread(
+              const delivery = await deliverToWebChatThread(
                 `Reminder: ${reminder.prompt}`,
                 reminderMessage(reminder),
                 "reminder",
               );
+              threadId = delivery.threadId;
+              // Best-effort, like the web push: the thread is already
+              // persisted, so an iMessage failure must not release the
+              // reminder — a retry would run the whole session again and
+              // create a duplicate thread.
+              try {
+                await runTool(
+                  notifyOwnerOverIMessage(delivery.reply ?? `Reminder fired: ${reminder.prompt}`),
+                );
+              } catch (error) {
+                console.error(`Reminder ${reminder.id} iMessage notification failed.`, error);
+              }
             }
             await completeReminder(reminder);
             await recordAutomationRun({

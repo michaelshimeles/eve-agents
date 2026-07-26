@@ -77,7 +77,7 @@ export default defineChannel({
                 },
               });
             } else {
-              threadId = await deliverToWebChatThread(`Webhook: ${hook.name}`, message, "webhook");
+              ({ threadId } = await deliverToWebChatThread(`Webhook: ${hook.name}`, message, "webhook"));
             }
             await recordAutomationRun({
               kind: "webhook",
