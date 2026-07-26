@@ -16,6 +16,7 @@ import {
   CaretDownIcon,
   CheckIcon,
   CopyIcon,
+  EnvelopeIcon,
   FileIcon,
   GearSixIcon,
   GitBranchIcon,
@@ -23,6 +24,7 @@ import {
   MagnifyingGlassIcon,
   KeyIcon,
   MicrophoneIcon,
+  MonitorIcon,
   PaperclipIcon,
   PencilSimpleIcon,
   PlusIcon,
@@ -39,6 +41,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CommandPalette } from "@/components/command-palette";
+import { ComputerViewer } from "@/components/computer-viewer";
+import { EmailClient } from "@/components/email-client";
 import { ManagePanel } from "@/components/manage-panel";
 import { Markdown } from "@/components/markdown";
 import { usePushNotifications } from "@/components/use-push";
@@ -71,8 +75,22 @@ const THREADS_KEY = "eve-web-threads";
 const SEEN_KEY = "eve-web-threads-seen";
 const LEGACY_CHAT_KEY = "eve-web-chat";
 const MODEL_KEY = "eve-web-model";
-const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5";
+/** Last-resort default when `/api/models` is unreachable. Live default comes from the Gateway catalog. */
+const FALLBACK_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-5";
 const REASONING_KEY = "eve-web-reasoning";
+/** Models released within this window get a "New" mark in the picker. */
+const NEW_MODEL_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * The desktop panel's visibility rides in the URL (`?desktop=1`) so a reload
+ * or a shared link comes back with the panel open, and back/forward walk
+ * through opening and closing it like any other navigation.
+ */
+const DESKTOP_PARAM = "desktop";
+
+function desktopOpenFromLocation(): boolean {
+  return new URLSearchParams(window.location.search).has(DESKTOP_PARAM);
+}
 
 /**
  * Reasoning effort riding along with each turn. "default" sends nothing and
@@ -105,6 +123,19 @@ interface ModelOption {
   name: string;
   description?: string | null;
   pricing?: { input: string; output: string } | null;
+  /** Unix seconds from the Gateway catalog; used for the "New" mark. */
+  released?: number | null;
+}
+
+interface ModelsResponse {
+  models?: ModelOption[];
+  defaultModel?: string;
+}
+
+function isNewModel(released: number | null | undefined, now = Date.now()): boolean {
+  if (released == null || !Number.isFinite(released)) return false;
+  const releasedMs = released * 1000;
+  return releasedMs <= now && now - releasedMs <= NEW_MODEL_WINDOW_MS;
 }
 
 const MODEL_FAVORITES_KEY = "eve-web-model-favorites";
@@ -133,9 +164,9 @@ function priceTier(pricing: ModelOption["pricing"]): string {
 
 function loadSavedModel(): string {
   try {
-    return localStorage.getItem(MODEL_KEY) ?? DEFAULT_MODEL_ID;
+    return localStorage.getItem(MODEL_KEY) ?? FALLBACK_DEFAULT_MODEL_ID;
   } catch {
-    return DEFAULT_MODEL_ID;
+    return FALLBACK_DEFAULT_MODEL_ID;
   }
 }
 
@@ -163,8 +194,8 @@ interface ThreadMeta {
   pinned?: boolean;
   /** Set once the user renames a thread, so auto-titles stop overwriting it. */
   renamed?: boolean;
-  /** Who started the thread; reminder/webhook threads get a sidebar badge. */
-  origin?: "web" | "reminder" | "webhook";
+  /** Who started the thread; proactive threads get a sidebar badge. */
+  origin?: "web" | "reminder" | "webhook" | "email";
 }
 
 interface ThreadIndex {
@@ -462,6 +493,26 @@ function CopyButton({ text, label = "Copy message" }: { text: string; label?: st
   );
 }
 
+/** An inline screenshot in a tool's output, when the tool captured one. */
+function outputImageDataUrl(output: unknown): string | null {
+  if (output === null || typeof output !== "object") return null;
+  const { imageDataUrl } = output as { imageDataUrl?: unknown };
+  return typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:image/")
+    ? imageDataUrl
+    : null;
+}
+
+/**
+ * The raw payload dump with any inline image collapsed to a stub: the image
+ * renders right above it, and a megabyte of base64 would bury every other
+ * field in the expanded view.
+ */
+function compactToolOutput(output: unknown): unknown {
+  if (outputImageDataUrl(output) === null) return output;
+  const { imageDataUrl, ...rest } = output as { imageDataUrl: string } & Record<string, unknown>;
+  return { ...rest, imageDataUrl: `<inline image, ${Math.round(imageDataUrl.length / 1024)} kB>` };
+}
+
 function ToolPayload({ label, value }: { label: string; value: unknown }) {
   let text: string;
   try {
@@ -577,12 +628,28 @@ export function Chat({ initialView = "chat" }: { initialView?: MainView } = {}) 
   return <ChatApp initialView={initialView} />;
 }
 
-/** What the main column shows; the sidebar is shared between both. */
-type MainView = "chat" | "manage";
+/** What the main column shows; the sidebar is shared across all of them. */
+type MainView = "chat" | "manage" | "email";
+
+const VIEW_PATHS: Record<MainView, string> = { chat: "/", manage: "/manage", email: "/email" };
+
+function pathForView(view: MainView): string {
+  return VIEW_PATHS[view];
+}
+
+function viewForPath(pathname: string): MainView {
+  if (pathname === VIEW_PATHS.manage) return "manage";
+  if (pathname === VIEW_PATHS.email) return "email";
+  return "chat";
+}
 
 function ChatApp({ initialView }: { initialView: MainView }) {
   const [index, setIndex] = useState<ThreadIndex>(loadThreadIndex);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Live view of the cloud desktop, alongside whatever else is on screen.
+  // Mirrored in the URL; change it through showDesktop, not the setter.
+  const [desktopOpen, setDesktopOpen] = useState(desktopOpenFromLocation);
+  const [hasDesktop, setHasDesktop] = useState(false);
   // The thread meta is kept separately from the open flag so the dialog's
   // text doesn't blank out during its closing animation.
   const [threadToDelete, setThreadToDelete] = useState<ThreadMeta | null>(null);
@@ -613,37 +680,54 @@ function ChatApp({ initialView }: { initialView: MainView }) {
   // First run on this device (no stored seen map): the first server sync
   // adopts every thread as read so history doesn't arrive covered in dots.
   const needsSeenSeedRef = useRef(Object.keys(seenAt).length === 0);
-  // Whether the main column shows the chat or the manage panel. The sidebar
-  // stays mounted either way; the URL is kept in sync via pushState so
-  // /manage is linkable and back/forward work without remounting the app.
+  // Whether the main column shows the chat, the manage panel, or the email
+  // client. The sidebar stays mounted either way; the URL is kept in sync via
+  // pushState so /manage and /email are linkable and back/forward work without
+  // remounting the app.
   const [view, setView] = useState<MainView>(initialView);
   // Web push opt-in for proactive notifications.
   const push = usePushNotifications();
   // Slash-command palette: built-ins plus skills saved from chat.
   const [commands, setCommands] = useState<SlashCommand[]>(BUILTIN_COMMANDS);
-  // Model picker: catalog from the Vercel AI Gateway, selection persisted.
+  // Model picker: live Gateway catalog (refreshed on mount and when opened).
   const [models, setModels] = useState<ModelOption[]>([]);
   const [model, setModel] = useState<string>(loadSavedModel);
+  // Which optional surfaces this deployment shipped, so the nav hides pages
+  // that would have nothing behind them. Assume present until told otherwise.
+  const [features, setFeatures] = useState<{ email: boolean }>({ email: true });
 
-  useEffect(() => {
-    void fetch("/api/models")
+  function applyModelsCatalog(body: ModelsResponse | null) {
+    if (!body) return;
+    const nextDefault =
+      typeof body.defaultModel === "string" && body.defaultModel.length > 0
+        ? body.defaultModel
+        : FALLBACK_DEFAULT_MODEL_ID;
+    if (!body.models?.length) return;
+    setModels(body.models);
+    // A saved model that left the catalog would fail every turn; fall
+    // back to the live default rather than keep sending a stale id.
+    setModel((current) => {
+      if (body.models?.some((option) => option.id === current)) return current;
+      try {
+        localStorage.setItem(MODEL_KEY, nextDefault);
+      } catch {
+        // Storage unavailable; the reset still applies for this session.
+      }
+      return nextDefault;
+    });
+  }
+
+  function refreshModels() {
+    return fetch("/api/models")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body: { models?: ModelOption[] } | null) => {
-        if (!body?.models?.length) return;
-        setModels(body.models);
-        // A saved model that left the catalog would fail every turn; fall
-        // back to the default rather than keep sending a stale id.
-        setModel((current) => {
-          if (body.models?.some((option) => option.id === current)) return current;
-          try {
-            localStorage.setItem(MODEL_KEY, DEFAULT_MODEL_ID);
-          } catch {
-            // Storage unavailable; the reset still applies for this session.
-          }
-          return DEFAULT_MODEL_ID;
-        });
+      .then((body: ModelsResponse | null) => {
+        applyModelsCatalog(body);
       })
       .catch(() => undefined);
+  }
+
+  useEffect(() => {
+    void refreshModels();
   }, []);
 
   function selectModel(id: string) {
@@ -723,6 +807,25 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         setCommands([...BUILTIN_COMMANDS, ...skillCommands]);
       })
       .catch(() => undefined);
+  }, []);
+
+  // Only offer surfaces this deployment actually has - the desktop needs a
+  // configured Orgo key, and the email page can be shipped or not. Saving or
+  // removing a key in the manage panel announces itself so buttons appear or
+  // vanish without a reload.
+  useEffect(() => {
+    function check(): void {
+      void fetch("/api/features")
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { computer?: boolean; email?: boolean } | null) => {
+          setHasDesktop(body?.computer === true);
+          setFeatures({ email: body?.email !== false });
+        })
+        .catch(() => undefined);
+    }
+    check();
+    window.addEventListener("eve:features-changed", check);
+    return () => window.removeEventListener("eve:features-changed", check);
   }, []);
 
   // Pull the server's thread list on load: prefer the newer copy of each
@@ -895,11 +998,13 @@ function ChatApp({ initialView }: { initialView: MainView }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Back/forward between "/" and "/manage" (we navigate with pushState so the
-  // app, and especially the sidebar, never remounts).
+  // Back/forward between "/", "/manage", and "/email", plus the desktop
+  // panel's open state (we navigate with pushState so the app, and especially
+  // the sidebar, never remounts).
   useEffect(() => {
     function onPopState() {
-      setView(window.location.pathname === "/manage" ? "manage" : "chat");
+      setView(viewForPath(window.location.pathname));
+      setDesktopOpen(desktopOpenFromLocation());
     }
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -909,10 +1014,21 @@ function ChatApp({ initialView }: { initialView: MainView }) {
 
   function showView(next: MainView) {
     setView(next);
-    const path = next === "manage" ? "/manage" : "/";
+    const path = pathForView(next);
     if (window.location.pathname !== path) {
-      window.history.pushState(null, "", path);
+      // Keep the query string: the desktop panel stays open across the switch.
+      window.history.pushState(null, "", path + window.location.search);
     }
+  }
+
+  /** Open or close the desktop panel, recording it in the URL. */
+  function showDesktop(open: boolean) {
+    setDesktopOpen(open);
+    const url = new URL(window.location.href);
+    if (url.searchParams.has(DESKTOP_PARAM) === open) return;
+    if (open) url.searchParams.set(DESKTOP_PARAM, "1");
+    else url.searchParams.delete(DESKTOP_PARAM);
+    window.history.pushState(null, "", url.pathname + url.search);
   }
 
   function newThread() {
@@ -1035,7 +1151,14 @@ function ChatApp({ initialView }: { initialView: MainView }) {
   }
 
   return (
-    <div className="flex h-dvh w-full">
+    <div
+      className={cn(
+        "flex h-dvh w-full",
+        // Give the desktop panel its own space instead of covering what is on
+        // screen, once the window is wide enough to spare it.
+        desktopOpen && "lg:pe-[36rem]",
+      )}
+    >
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
@@ -1079,6 +1202,34 @@ function ChatApp({ initialView }: { initialView: MainView }) {
                 }
                 className={cn(push.status !== "on" && "text-kumo-subtle")}
                 onClick={push.toggle}
+              />
+            )}
+            {features.email && (
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={EnvelopeIcon}
+                aria-label="Email"
+                aria-pressed={view === "email"}
+                title={`Email: ${AGENT_NAME}'s own inbox`}
+                className={cn(view === "email" && "bg-kumo-tint text-kumo-strong")}
+                onClick={() => showView(view === "email" ? "chat" : "email")}
+              />
+            )}
+            {hasDesktop && (
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={MonitorIcon}
+                aria-label={`${AGENT_NAME}'s desktop`}
+                aria-pressed={desktopOpen}
+                title={`${AGENT_NAME}'s desktop: watch her cloud computer live`}
+                className={cn(
+                  desktopOpen ? "bg-kumo-tint text-kumo-strong" : "text-kumo-subtle",
+                )}
+                onClick={() => showDesktop(!desktopOpen)}
               />
             )}
             <Button
@@ -1192,6 +1343,8 @@ function ChatApp({ initialView }: { initialView: MainView }) {
             <ManagePanel onOpenThread={selectThread} />
           </div>
         </main>
+      ) : view === "email" ? (
+        <EmailClient onOpenSidebar={() => setSidebarOpen(true)} />
       ) : activeChat && activeChat.threadId === index.activeId ? (
         <ChatThread
           key={`${index.activeId}:${activeChat.revision ?? 0}`}
@@ -1210,6 +1363,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
           model={model}
           models={models}
           onModelChange={selectModel}
+          onRefreshModels={refreshModels}
           reasoning={reasoning}
           onReasoningChange={selectReasoning}
           allowResume={
@@ -1217,12 +1371,16 @@ function ChatApp({ initialView }: { initialView: MainView }) {
             (activeChat.chat.events?.length ?? 0)
           }
           onResumed={(chat) => adoptResumedChat(index.activeId, chat)}
+          onWatchDesktop={() => showDesktop(true)}
+          hasDesktop={hasDesktop}
         />
       ) : (
         <main className="flex h-dvh min-w-0 flex-1 items-center justify-center text-kumo-subtle">
           <Loader size={20} />
         </main>
       )}
+
+      {desktopOpen && <DesktopDrawer onClose={() => showDesktop(false)} />}
 
       <CommandPalette
         open={commandPaletteOpen}
@@ -1233,6 +1391,7 @@ function ChatApp({ initialView }: { initialView: MainView }) {
         onSelectThread={selectThread}
         onNewChat={newThread}
         onOpenManage={() => showView("manage")}
+        onOpenEmail={features.email ? () => showView("email") : undefined}
         pushStatus={push.status}
         onTogglePush={push.toggle}
       />
@@ -1365,6 +1524,12 @@ function SidebarThread({
               aria-label="Started by a webhook"
             />
           )}
+          {thread.origin === "email" && (
+            <EnvelopeIcon
+              className="ms-1.5 size-3 shrink-0 text-kumo-subtle"
+              aria-label="Started by an incoming email"
+            />
+          )}
         </span>
         <span className="block text-xs text-kumo-subtle">
           {formatThreadDate(thread.updatedAt)}
@@ -1414,10 +1579,13 @@ function ChatThread({
   model,
   models,
   onModelChange,
+  onRefreshModels,
   reasoning,
   onReasoningChange,
   allowResume,
   onResumed,
+  onWatchDesktop,
+  hasDesktop,
 }: {
   threadId: string;
   initialChat: SavedChat;
@@ -1434,15 +1602,25 @@ function ChatThread({
   model: string;
   models: ModelOption[];
   onModelChange: (id: string) => void;
+  /** Re-fetch the Gateway catalog when the picker opens. */
+  onRefreshModels: () => void;
   reasoning: ReasoningId;
   onReasoningChange: (id: ReasoningId) => void;
   /** Gate on the interrupted-turn stream reattach (one attempt per visit). */
   allowResume: boolean;
   /** A reattached stream settled; remount me with the merged chat. */
   onResumed: (chat: SavedChat) => void;
+  /** Opens the live view of the cloud desktop, shared with the app header. */
+  onWatchDesktop: () => void;
+  /** Whether this deployment has a cloud desktop; gates the composer toggle. */
+  hasDesktop: boolean;
 }) {
   const [draft, setDraft] = useState(initialDraft ?? "");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Composer toggle: steer this thread's work onto the cloud desktop. Off
+  // means "agent's choice", not "don't use the computer" - the flag only
+  // rides along while it is on.
+  const [useComputer, setUseComputer] = useState(false);
   // One-turn transcript context for threads forked from a message: eve
   // sessions are append-only, so the fork starts a fresh session and this
   // rides along on its first send only.
@@ -1506,6 +1684,9 @@ function ChatThread({
         clientContext: {
           eveWebModel: model,
           ...(reasoning !== "default" ? { eveWebReasoning: reasoning } : {}),
+          // The composer's computer toggle: the desktop instructions tell the
+          // agent this flag means "do this on your cloud desktop".
+          ...(useComputer ? { eveWebUseComputer: true } : {}),
           clientTime: new Date().toLocaleString("en-CA", {
             year: "numeric",
             month: "short",
@@ -1958,6 +2139,7 @@ function ChatThread({
                       onRegenerate={regenerateLastReply}
                       onFork={forkFromMessage}
                       onRespond={respondToInput}
+                      onWatchDesktop={onWatchDesktop}
                     />
                   </MessageScrollerItem>
                 ))}
@@ -2129,8 +2311,32 @@ function ChatThread({
                 onClick={() => fileInputRef.current?.click()}
               />
               <div className="ms-auto flex items-center gap-1">
+                {hasDesktop && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    shape="square"
+                    icon={MonitorIcon}
+                    aria-label="Do this on the computer"
+                    aria-pressed={useComputer}
+                    title={
+                      useComputer
+                        ? `${AGENT_NAME} will do this on her computer - click to leave the choice to her`
+                        : `Have ${AGENT_NAME} do this on her computer`
+                    }
+                    className={cn(
+                      useComputer ? "bg-kumo-tint !text-kumo-strong" : "text-kumo-subtle",
+                    )}
+                    onClick={() => setUseComputer((value) => !value)}
+                  />
+                )}
                 <ReasoningPicker reasoning={reasoning} onSelect={onReasoningChange} />
-                <ModelPicker model={model} models={models} onSelect={onModelChange} />
+                <ModelPicker
+                  model={model}
+                  models={models}
+                  onSelect={onModelChange}
+                  onOpen={onRefreshModels}
+                />
                 {speechSupported && (
                   <Button
                     type="button"
@@ -2176,6 +2382,45 @@ function ChatThread({
         </footer>
       </div>
     </main>
+  );
+}
+
+/**
+ * Side panel holding the live desktop. Deliberately not a modal: the point is
+ * to watch the agent work while the conversation carries on next to it.
+ */
+function DesktopDrawer({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" aria-hidden onClick={onClose} />
+      <aside
+        aria-label={`${AGENT_NAME}'s desktop`}
+        className="fixed inset-y-0 end-0 z-50 flex w-full max-w-xl flex-col gap-3 border-s border-kumo-hairline bg-kumo-elevated p-4 shadow-xl"
+      >
+        <div className="flex items-center gap-2">
+          <MonitorIcon className="size-4" />
+          <h2 className="text-sm font-medium">{AGENT_NAME}&rsquo;s desktop</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={XIcon}
+            aria-label="Close desktop"
+            className="ms-auto"
+            onClick={onClose}
+          />
+        </div>
+        <ComputerViewer />
+      </aside>
+    </>
   );
 }
 
@@ -2276,10 +2521,13 @@ function ModelPicker({
   model,
   models,
   onSelect,
+  onOpen,
 }: {
   model: string;
   models: ModelOption[];
   onSelect: (id: string) => void;
+  /** Pull a fresh Gateway catalog each time the menu opens. */
+  onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -2337,7 +2585,11 @@ function ModelPicker({
         aria-expanded={open}
         className="max-w-40 text-kumo-subtle hover:text-kumo-default"
         onClick={() => {
-          setOpen((prev) => !prev);
+          setOpen((prev) => {
+            const next = !prev;
+            if (next) onOpen?.();
+            return next;
+          });
           setQuery("");
         }}
       >
@@ -2419,6 +2671,7 @@ function ModelPicker({
               {filtered.map((option) => {
                 const tier = priceTier(option.pricing);
                 const starred = favorites.includes(option.id);
+                const recent = isNewModel(option.released);
                 return (
                   <div
                     key={option.id}
@@ -2436,6 +2689,11 @@ function ModelPicker({
                     >
                       <span className="flex items-center gap-1.5">
                         <span className="truncate text-sm font-medium">{option.name}</span>
+                        {recent && (
+                          <span className="shrink-0 text-[11px] font-medium text-kumo-strong">
+                            New
+                          </span>
+                        )}
                         {tier && (
                           <span className="shrink-0 text-[11px] text-kumo-subtle">{tier}</span>
                         )}
@@ -2481,6 +2739,7 @@ function ChatMessage({
   onRegenerate,
   onFork,
   onRespond,
+  onWatchDesktop,
 }: {
   message: EveMessage;
   usage?: TurnUsage;
@@ -2492,6 +2751,7 @@ function ChatMessage({
   onRegenerate: () => void;
   onFork: (message: EveMessage, includeTurn: boolean, draft?: string) => void;
   onRespond: (requestId: string, optionId: string) => void;
+  onWatchDesktop: () => void;
 }) {
   const align = message.role === "user" ? "end" : "start";
   const text = messageText(message);
@@ -2503,7 +2763,13 @@ function ChatMessage({
     <Message align={align}>
       <MessageContent className="gap-2">
         {message.parts.map((part, index) => (
-          <ChatPart key={index} part={part} role={message.role} onRespond={onRespond} />
+          <ChatPart
+            key={index}
+            part={part}
+            role={message.role}
+            onRespond={onRespond}
+            onWatchDesktop={onWatchDesktop}
+          />
         ))}
         {message.role === "assistant" && text.length > 0 && (
           <div className={cn(actionRowClass, !assistantDone && "invisible")}>
@@ -2582,10 +2848,12 @@ function ChatPart({
   part,
   role,
   onRespond,
+  onWatchDesktop,
 }: {
   part: EveMessagePart;
   role: "assistant" | "user";
   onRespond: (requestId: string, optionId: string) => void;
+  onWatchDesktop: () => void;
 }) {
   switch (part.type) {
     case "text": {
@@ -2650,6 +2918,10 @@ function ChatPart({
       const label = part.toolName.replaceAll("_", " ");
       const running = part.state === "input-streaming" || part.state === "input-available";
       const expandable = part.input !== undefined || part.state === "output-available";
+      // Screenshot tools (browser__screenshot, computer_screenshot) hand back
+      // an inline image meant for the owner's eyes, not the model's: it only
+      // exists here, so render it or nobody ever sees it.
+      const image = part.state === "output-available" ? outputImageDataUrl(part.output) : null;
 
       const marker = (
         <Marker role={running ? "status" : undefined}>
@@ -2670,20 +2942,37 @@ function ChatPart({
 
       return (
         <div className="flex flex-col gap-2">
-          {expandable ? (
-            <details>
-              <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
-                {marker}
-              </summary>
-              <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
-                <ToolPayload label="Input" value={part.input} />
-                {part.state === "output-available" && (
-                  <ToolPayload label="Output" value={part.output} />
-                )}
-              </div>
-            </details>
-          ) : (
-            marker
+          <div className="flex items-start gap-1">
+            {expandable ? (
+              <details className="min-w-0">
+                <summary className="w-fit cursor-pointer list-none rounded-md hover:brightness-125 [&::-webkit-details-marker]:hidden">
+                  {marker}
+                </summary>
+                <div className="mt-2 flex flex-col gap-2 border-s-2 border-kumo-hairline ps-3">
+                  <ToolPayload label="Input" value={part.input} />
+                  {part.state === "output-available" && (
+                    <ToolPayload label="Output" value={compactToolOutput(part.output)} />
+                  )}
+                </div>
+              </details>
+            ) : (
+              marker
+            )}
+            {/* The desktop is the one tool whose work is worth watching live. */}
+            {part.toolName.startsWith("computer_") && (
+              <Button variant="ghost" size="sm" onClick={onWatchDesktop}>
+                <MonitorIcon />
+                Watch
+              </Button>
+            )}
+          </div>
+          {image !== null && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={image}
+              alt={`${label} result`}
+              className="h-auto w-fit max-w-full rounded-lg ring ring-kumo-hairline"
+            />
           )}
           {part.state === "output-error" && (
             <Bubble variant="destructive">

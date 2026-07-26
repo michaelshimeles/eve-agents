@@ -1,7 +1,7 @@
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
 // Lazy init: DATABASE_URL may be absent at build time (same pattern as
-// agent/lib/receipts-db.ts).
+// agent/lib/neon.ts).
 let _sql: NeonQueryFunction<false, false> | null = null;
 let ensured: Promise<void> | null = null;
 
@@ -36,8 +36,11 @@ async function ensureTable(): Promise<void> {
   await ensured;
 }
 
-/** Who started the thread: the user, a fired reminder, or a webhook event. */
-export type ThreadOrigin = "web" | "reminder" | "webhook";
+/**
+ * Who started the thread: the user, a fired reminder, a webhook event, or mail
+ * arriving in the agent's own inbox.
+ */
+export type ThreadOrigin = "web" | "reminder" | "webhook" | "email";
 
 export interface ThreadMetaRow {
   title: string;
@@ -52,7 +55,7 @@ export interface ThreadRow extends ThreadMetaRow {
 }
 
 function toOrigin(value: unknown): ThreadOrigin {
-  return value === "reminder" || value === "webhook" ? value : "web";
+  return value === "reminder" || value === "webhook" || value === "email" ? value : "web";
 }
 
 export async function listThreads(): Promise<ThreadRow[]> {
