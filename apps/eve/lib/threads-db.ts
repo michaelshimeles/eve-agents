@@ -1,7 +1,7 @@
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
 // Lazy init: DATABASE_URL may be absent at build time (same pattern as
-// agent/lib/receipts-db.ts).
+// agent/lib/neon.ts).
 let _sql: NeonQueryFunction<false, false> | null = null;
 let ensured: Promise<void> | null = null;
 
@@ -36,8 +36,11 @@ async function ensureTable(): Promise<void> {
   await ensured;
 }
 
-/** Who started the thread: the user, a fired reminder, or a webhook event. */
-export type ThreadOrigin = "web" | "reminder" | "webhook";
+/**
+ * Who started the thread: the user, a fired reminder, a webhook event, mail
+ * arriving in the agent's own inbox, or an answered approval notification.
+ */
+export type ThreadOrigin = "web" | "reminder" | "webhook" | "email" | "notification";
 
 export interface ThreadMetaRow {
   title: string;
@@ -52,7 +55,9 @@ export interface ThreadRow extends ThreadMetaRow {
 }
 
 function toOrigin(value: unknown): ThreadOrigin {
-  return value === "reminder" || value === "webhook" ? value : "web";
+  return value === "reminder" || value === "webhook" || value === "email" || value === "notification"
+    ? value
+    : "web";
 }
 
 export async function listThreads(): Promise<ThreadRow[]> {
@@ -134,6 +139,14 @@ export async function getThreadChat(id: string): Promise<unknown | null> {
 
 // Origin is written once on insert and never updated: rename/pin/chat writes
 // from the UI must not reset a reminder/webhook thread back to "web".
+//
+// The update is conditional on the incoming event log being at least as long
+// as the stored one. A thread's event log only ever grows (eve sessions are
+// append-only and the client always writes the full log), so length is a
+// writer-clock-independent version: a delayed retry, a slower tab, or a
+// device with a skewed clock can never clobber a longer transcript with a
+// shorter one, no matter what timestamp it carries. Equal lengths still
+// apply, keeping retries and meta-refresh writes idempotent.
 export async function upsertThread(
   id: string,
   meta: ThreadMetaRow,
@@ -150,6 +163,8 @@ export async function upsertThread(
           pinned = EXCLUDED.pinned,
           renamed = EXCLUDED.renamed,
           chat = EXCLUDED.chat
+      WHERE jsonb_array_length(coalesce(web_chat_threads.chat->'events', '[]'::jsonb))
+         <= jsonb_array_length(coalesce(EXCLUDED.chat->'events', '[]'::jsonb))
   `;
 }
 

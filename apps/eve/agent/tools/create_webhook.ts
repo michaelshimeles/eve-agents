@@ -2,6 +2,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { createWebhook, webhookUrl } from "../lib/webhooks-db";
+import { ownerOnly } from "../lib/owner-gate";
 
 function telegramChatId(attributes: Record<string, unknown>): string | null {
   const chatId = attributes.chat_id;
@@ -9,6 +10,7 @@ function telegramChatId(attributes: Record<string, unknown>): string | null {
 }
 
 export default defineTool({
+  approval: ownerOnly,
   description:
     "Create an event trigger: a webhook URL that wakes you when an external service POSTs to it (deploy failed, form submitted, payment received, email rule matched). You receive the payload, follow the stored instruction, and message Micky. Give him the returned URL to paste into the service.",
   inputSchema: z.object({
