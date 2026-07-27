@@ -1,6 +1,7 @@
 import { put } from "@vercel/blob";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { ownerOnly } from "../lib/owner-gate";
 
 // Bridges the sandbox filesystem to Micky: the sandbox is invisible to him,
 // so files the agent creates there (reports, exports, images, archives) get
@@ -9,6 +10,7 @@ import { z } from "zod";
 const MAX_BYTES = 50 * 1024 * 1024;
 
 export default defineTool({
+  approval: ownerOnly,
   description:
     "Share a file from your sandbox with Micky: uploads it to file storage and returns a public download URL. Use this whenever you create a file he should receive (a report, CSV export, image, PDF, zip) instead of pasting its contents into chat. Give him the returned URL as a markdown link.",
   inputSchema: z.object({
