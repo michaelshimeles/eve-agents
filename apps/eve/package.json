@@ -10,6 +10,7 @@
     "build": "next build",
     "dev": "next dev",
     "start": "next start",
+    "test": "vitest run",
     "typecheck": "tsc"
   },
   "dependencies": {
@@ -17,23 +18,33 @@
     "@base-ui/react": "^1.6.0",
     "@cloudflare/kumo": "^2.8.0",
     "@neondatabase/serverless": "^1.1.0",
+    "@novnc/novnc": "^1.7.0",
     "@phosphor-icons/react": "^2.1.10",
+    "@remotion/bundler": "4.0.499",
+    "@remotion/renderer": "4.0.499",
     "@shadcn/react": "^0.2.1",
+    "@spectrum-ts/core": "^12.4.0",
+    "@spectrum-ts/imessage": "^12.4.0",
     "@vercel/blob": "^2.6.1",
     "@vercel/connect": "0.4.0",
+    "@vercel/functions": "^3.7.6",
     "ai": "^7.0.26",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cron-parser": "^5.6.2",
+    "effect": "4.0.0-beta.101",
     "eve": "^0.27.0",
+    "heif2jpeg": "^0.1.6",
     "next": "^16.2.11",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "remark-breaks": "^4.0.0",
+    "remotion": "4.0.499",
     "shadcn": "^4.13.1",
     "streamdown": "^2.5.0",
     "tailwind-merge": "^3.6.0",
     "web-push": "^3.6.7",
+    "ws": "^8.21.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -42,10 +53,13 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/web-push": "^3.6.4",
+    "@types/ws": "^8.18.1",
+    "just-bash": "^3.1.0",
     "microsandbox": "^0.5.10",
     "postcss": "^8.5.21",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   },
   "overrides": {
     "ai": "^7.0.26"
