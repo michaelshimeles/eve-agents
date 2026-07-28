@@ -1,19 +1,31 @@
 "use client";
 
-import { Badge, Button, DropdownMenu, Input, InputArea, Loader, Tabs } from "@cloudflare/kumo";
+import { Badge, Button, DropdownMenu, Input, InputArea, Loader, Radio } from "@cloudflare/kumo";
 import {
+  AlarmIcon,
   ArrowSquareOutIcon,
+  BrainIcon,
   CaretDownIcon,
+  CaretLeftIcon,
   CaretRightIcon,
+  ChatCircleDotsIcon,
   CheckIcon,
   CopyIcon,
+  CreditCardIcon,
+  LightningIcon,
+  MagicWandIcon,
+  MonitorIcon,
   PencilSimpleIcon,
   PlugsIcon,
   PlusIcon,
+  SidebarSimpleIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
+import { CardPanel } from "@/components/card-panel";
+import { ComputerViewer } from "@/components/computer-viewer";
+import { IMessagePanel } from "@/components/imessage-panel";
 import { AGENT_NAME } from "@/lib/identity";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +34,23 @@ import { cn } from "@/lib/utils";
 // saved skills. Reminders/webhooks/memory stay read + delete (creation is
 // conversational); connections can be added/removed here because that's an
 // OAuth flow, and skills are editable since they're plain markdown.
-// Rendered by the /manage page.
+// Owns the whole manage surface: a sections sidebar that takes the thread
+// sidebar's slot (same width, surface, and off-canvas mobile behavior — the
+// thread list hides while this view is up) and the selected section's content
+// on the right. Rendered by the /manage page.
+
+/**
+ * The open section rides in the URL (`?tab=<value>`), matching how the shell
+ * records the view, open thread, and desktop panel: a reload or a shared
+ * link lands on the same section, and back/forward walk through section
+ * switches. Clicks push it; a catch-all effect keeps it in step when the
+ * section changes some other way (an absent feature's fallback).
+ */
+const TAB_PARAM = "tab";
+
+function tabFromLocation(): string | null {
+  return new URLSearchParams(window.location.search).get(TAB_PARAM);
+}
 
 interface ReminderItem {
   id: number;
@@ -51,6 +79,21 @@ interface RunItem {
   error: string | null;
   threadId: string | null;
 }
+
+type DeliveryTarget = "origin" | "web" | "telegram" | "imessage";
+
+interface DeliveryView {
+  target: DeliveryTarget;
+  telegramLinked: boolean;
+  imessagePaired: boolean;
+}
+
+const DELIVERY_LABELS: Record<DeliveryTarget, string> = {
+  origin: "Where created",
+  web: "Web chat",
+  telegram: "Telegram",
+  imessage: "iMessage",
+};
 
 interface MemoryItem {
   id: string;
@@ -198,6 +241,53 @@ function RunHistory({
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Where reminder and trigger results get delivered. "Where created" is the
+ * default (Telegram-created automations reply into that DM, web-created ones
+ * land as web chat threads); an explicit choice pins every result to one
+ * place. Unavailable choices fall back to web chat, called out in the hint.
+ */
+function DeliveryPicker({
+  delivery,
+  onChange,
+}: {
+  delivery: DeliveryView;
+  onChange: (target: DeliveryTarget) => void;
+}) {
+  const hint =
+    delivery.target === "telegram" && !delivery.telegramLinked
+      ? "No Telegram chat is linked yet — results land in web chat until you message the bot once."
+      : delivery.target === "imessage" && !delivery.imessagePaired
+        ? "No iMessage number is paired — results land in web chat. Pair one under the iMessage tab."
+        : null;
+  return (
+    <div className="mb-5 flex flex-col gap-2 border-b border-kumo-hairline pb-4">
+      <span className="text-xs text-kumo-subtle">Deliver reminder and trigger results to</span>
+      <Radio.Group<DeliveryTarget>
+        orientation="horizontal"
+        value={delivery.target}
+        onValueChange={(value) => onChange(value)}
+      >
+        {/* The visible label is the span above; keep an invisible legend so
+            the group still announces itself to assistive tech. */}
+        <Radio.Legend className="sr-only">Deliver reminder and trigger results to</Radio.Legend>
+        {(Object.entries(DELIVERY_LABELS) as [DeliveryTarget, string][]).map(([value, label]) => (
+          <Radio.Item<DeliveryTarget>
+            key={value}
+            label={label}
+            value={value}
+            // Kumo has no small radio: dial the stock 16px control (a span
+            // with data-kumo-part="item", not a button) and text-base label
+            // down to sit with this section's text-xs scale.
+            className="[&>span]:text-sm [&>[data-kumo-part=item]]:mt-[3px] [&>[data-kumo-part=item]]:size-3.5 [&>[data-kumo-part=item]_span]:size-1.5"
+          />
+        ))}
+      </Radio.Group>
+      {hint !== null && <p className="text-xs text-kumo-subtle">{hint}</p>}
+    </div>
   );
 }
 
@@ -532,6 +622,13 @@ interface FeatureFlags {
   proactive: boolean;
   integrations: boolean;
   skills: boolean;
+  /** Deployment ships the desktop feature; the tab doubles as key setup, so it
+   * shows even before a key is configured. */
+  computerAvailable: boolean;
+  /** Same idea for payments: the tab is where the connection is made. */
+  cardAvailable: boolean;
+  /** And for iMessage: the tab is where pairing happens. */
+  imessageAvailable: boolean;
 }
 
 // Personal deployments have everything; builder deployments report what they
@@ -541,6 +638,9 @@ const ALL_FEATURES_ON: FeatureFlags = {
   proactive: true,
   integrations: true,
   skills: true,
+  computerAvailable: true,
+  cardAvailable: true,
+  imessageAvailable: true,
 };
 
 interface UpdateInfo {
@@ -552,16 +652,29 @@ interface UpdateInfo {
 
 export function ManagePanel({
   onOpenThread,
+  sidebarOpen,
+  onOpenSidebar,
+  onCloseSidebar,
+  onBack,
 }: {
   /** Jump to a thread (e.g. one a reminder delivered). */
   onOpenThread: (threadId: string) => void;
+  /** Whether the shared off-canvas sidebar is open (matters below md). */
+  sidebarOpen: boolean;
+  onOpenSidebar: () => void;
+  onCloseSidebar: () => void;
+  /** Return to the chat view; the sections sidebar swaps back to threads. */
+  onBack: () => void;
 }) {
-  const [tab, setTab] = useState("reminders");
+  // A URL-named section is trusted even before /api/features answers; the
+  // fallback effect below corrects it if the feature turns out to be absent.
+  const [tab, setTab] = useState(() => tabFromLocation() ?? "reminders");
   const [features, setFeatures] = useState<FeatureFlags>(ALL_FEATURES_ON);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [reminders, setReminders] = useState<ReminderItem[] | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookItem[] | null>(null);
   const [runs, setRuns] = useState<RunItem[]>([]);
+  const [delivery, setDelivery] = useState<DeliveryView | null>(null);
   const [memories, setMemories] = useState<MemoryItem[] | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<string | null>(null);
 
@@ -589,11 +702,13 @@ export function ManagePanel({
             reminders?: ReminderItem[];
             webhooks?: WebhookItem[];
             runs?: RunItem[];
+            delivery?: DeliveryView;
           } | null,
         ) => {
           setReminders(body?.reminders ?? []);
           setWebhooks(body?.webhooks ?? []);
           setRuns(body?.runs ?? []);
+          setDelivery(body?.delivery ?? null);
         },
       )
       .catch(() => {
@@ -605,6 +720,20 @@ export function ManagePanel({
       .then((body: { memories?: MemoryItem[] } | null) => setMemories(body?.memories ?? []))
       .catch(() => setMemories([]));
   }, []);
+
+  function changeDelivery(target: DeliveryTarget) {
+    setDelivery((prev) => (prev === null ? prev : { ...prev, target }));
+    void fetch("/api/automations", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delivery: target }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { delivery?: DeliveryView } | null) => {
+        if (body?.delivery !== undefined) setDelivery(body.delivery);
+      })
+      .catch(() => undefined);
+  }
 
   function cancelReminder(id: number) {
     setReminders((prev) => prev?.filter((reminder) => reminder.id !== id) ?? null);
@@ -638,190 +767,304 @@ export function ManagePanel({
     return runs.filter((run) => run.kind === kind && run.automationId === id);
   }
 
-  const visibleTabs = [
+  const sections: {
+    value: string;
+    label: string;
+    icon: React.ElementType;
+    count?: number;
+  }[] = [
     ...(features.proactive
       ? [
-          { value: "reminders", label: `Reminders${reminders ? ` (${reminders.length})` : ""}` },
-          { value: "webhooks", label: `Triggers${webhooks ? ` (${webhooks.length})` : ""}` },
+          { value: "reminders", label: "Reminders", icon: AlarmIcon, count: reminders?.length },
+          { value: "webhooks", label: "Triggers", icon: LightningIcon, count: webhooks?.length },
         ]
       : []),
     ...(features.memory
-      ? [{ value: "memory", label: `Memory${memories ? ` (${memories.length})` : ""}` }]
+      ? [{ value: "memory", label: "Memory", icon: BrainIcon, count: memories?.length }]
       : []),
-    ...(features.integrations ? [{ value: "connections", label: "Connections" }] : []),
-    ...(features.skills ? [{ value: "skills", label: "Skills" }] : []),
+    ...(features.integrations
+      ? [{ value: "connections", label: "Connections", icon: PlugsIcon }]
+      : []),
+    ...(features.skills ? [{ value: "skills", label: "Skills", icon: MagicWandIcon }] : []),
+    ...(features.computerAvailable
+      ? [{ value: "computer", label: "Computer", icon: MonitorIcon }]
+      : []),
+    ...(features.cardAvailable ? [{ value: "card", label: "Card", icon: CreditCardIcon }] : []),
+    ...(features.imessageAvailable
+      ? [{ value: "imessage", label: "iMessage", icon: ChatCircleDotsIcon }]
+      : []),
   ];
 
-  // If the active tab's feature turns out to be absent, land on the first
-  // tab that exists instead of an empty pane.
+  // If the active section's feature turns out to be absent, land on the first
+  // section that exists instead of an empty pane.
   useEffect(() => {
-    if (visibleTabs.length > 0 && !visibleTabs.some((entry) => entry.value === tab)) {
-      setTab(visibleTabs[0].value);
+    if (sections.length > 0 && !sections.some((entry) => entry.value === tab)) {
+      setTab(sections[0].value);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the derived list
   }, [features, tab]);
 
+  /** Switch sections, recording the switch in the URL. */
+  function selectTab(value: string) {
+    setTab(value);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get(TAB_PARAM) === value) return;
+    url.searchParams.set(TAB_PARAM, value);
+    window.history.pushState(null, "", url.pathname + url.search);
+  }
+
+  // Catch-all URL sync: clicks record `?tab=` themselves, but the section can
+  // also change with no navigation (the fallback above, a bogus URL value).
+  // replaceState so those corrections don't grow history; on first open this
+  // also stamps the param onto a bare "/manage" entry.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get(TAB_PARAM) === tab) return;
+    url.searchParams.set(TAB_PARAM, tab);
+    window.history.replaceState(null, "", url.pathname + url.search);
+  }, [tab]);
+
+  // Back/forward across section switches while the panel is mounted. Entries
+  // that name no section (from before the panel opened) keep the current one.
+  useEffect(() => {
+    function onPopState() {
+      const value = tabFromLocation();
+      if (value !== null) setTab(value);
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const activeSection = sections.find((entry) => entry.value === tab);
+
   return (
-    <div>
-      {update?.updateAvailable === true && update.updateUrl !== undefined && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-kumo-hairline bg-kumo-tint px-4 py-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">A newer version of this agent is available</p>
-            <p className="mt-0.5 text-xs text-kumo-subtle">
-              Updating takes a few minutes and keeps your chats, memories, connections, skills,
-              and settings.
-              {update.currentVersion !== undefined && update.latestVersion !== undefined && (
-                <span className="ms-1 font-mono">
-                  {update.currentVersion} &rarr; {update.latestVersion}
-                </span>
-              )}
-            </p>
-          </div>
-          <a
-            href={update.updateUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex shrink-0 items-center gap-1 text-sm font-medium text-kumo-interact hover:underline"
-          >
-            Update
-            <ArrowSquareOutIcon className="size-3.5" />
-          </a>
+    <>
+      <aside
+        className={cn(
+          // Mirrors the thread sidebar exactly — same width, surface, and
+          // off-canvas mobile behavior — so Manage swaps into the same slot.
+          "fixed inset-y-0 start-0 z-40 flex w-64 shrink-0 -translate-x-full flex-col border-e border-kumo-hairline bg-kumo-elevated transition-transform duration-200 md:static md:translate-x-0",
+          sidebarOpen && "translate-x-0",
+        )}
+      >
+        <div className="flex items-center gap-1 px-3 py-2.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={CaretLeftIcon}
+            aria-label="Back to chat"
+            title="Back to chat"
+            onClick={onBack}
+          />
+          <span className="text-sm font-semibold">Manage</span>
         </div>
-      )}
-      <Tabs
-        size="sm"
-        // Hug the tab labels like the Kumo docs demo instead of stretching
-        // the segmented track across the whole page column.
-        className="w-fit max-w-full"
-        value={tab}
-        onValueChange={setTab}
-        tabs={visibleTabs}
-      />
-
-      <div className="mt-3 min-h-40">
-        {tab === "reminders" &&
-          (reminders === null ? (
-            <LoadingRow />
-          ) : reminders.length === 0 ? (
-            <EmptyNote>
-              No reminders. Try &ldquo;remind me to stretch at 6pm&rdquo; in chat.
-            </EmptyNote>
-          ) : (
-            <ul className="flex flex-col">
-              {reminders.map((reminder) => {
-                const history = runsFor("reminder", reminder.id);
-                const expanded = expandedRuns === `reminder:${reminder.id}`;
-                return (
-                  <li
-                    key={reminder.id}
-                    className="border-b border-kumo-hairline py-2 last:border-b-0"
-                  >
-                    <div className="flex items-center gap-2">
-                      <ExpandCaret
-                        expanded={expanded}
-                        label={`${expanded ? "Hide" : "Show"} run history`}
-                        onToggle={() =>
-                          setExpandedRuns(expanded ? null : `reminder:${reminder.id}`)
-                        }
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm" title={reminder.prompt}>
-                          {reminder.prompt}
-                        </p>
-                        <p className="mt-0.5 text-xs text-kumo-subtle">
-                          Next: {formatWhen(reminder.nextFireAt)}
-                          {reminder.cron !== null && ` · ${reminder.cron} (${reminder.timezone})`}
-                          {history.length > 0 && ` · ran ${history.length}×`}
-                        </p>
-                      </div>
-                      <Badge variant="secondary">
-                        {reminder.cron === null ? "one-off" : "recurring"}
-                      </Badge>
-                      <DeleteButton
-                        label={`Cancel reminder ${reminder.id}`}
-                        onDelete={() => cancelReminder(reminder.id)}
-                      />
-                    </div>
-                    {expanded && <RunHistory runs={history} onOpenThread={onOpenThread} />}
-                  </li>
-                );
-              })}
-            </ul>
-          ))}
-
-        {tab === "webhooks" &&
-          (webhooks === null ? (
-            <LoadingRow />
-          ) : webhooks.length === 0 ? (
-            <EmptyNote>
-              No event triggers. Ask {AGENT_NAME} to &ldquo;create a webhook for deploy
-              alerts&rdquo;.
-            </EmptyNote>
-          ) : (
-            <ul className="flex flex-col">
-              {webhooks.map((hook) => {
-                const history = runsFor("webhook", hook.id);
-                const expanded = expandedRuns === `webhook:${hook.id}`;
-                return (
-                  <li key={hook.id} className="border-b border-kumo-hairline py-2 last:border-b-0">
-                    <div className="flex items-center gap-2">
-                      <ExpandCaret
-                        expanded={expanded}
-                        label={`${expanded ? "Hide" : "Show"} run history`}
-                        onToggle={() => setExpandedRuns(expanded ? null : `webhook:${hook.id}`)}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm">{hook.name}</p>
-                        <p className="mt-0.5 truncate text-xs text-kumo-subtle" title={hook.prompt}>
-                          {hook.prompt}
-                        </p>
-                        <p className="mt-0.5 text-xs text-kumo-subtle">
-                          Fired {hook.fireCount} {hook.fireCount === 1 ? "time" : "times"} · last{" "}
-                          {formatWhen(hook.lastFiredAt)}
-                        </p>
-                      </div>
-                      <CopyUrlButton url={hook.url} />
-                      <DeleteButton
-                        label={`Delete trigger ${hook.name}`}
-                        onDelete={() => deleteWebhook(hook.id)}
-                      />
-                    </div>
-                    {expanded && <RunHistory runs={history} onOpenThread={onOpenThread} />}
-                  </li>
-                );
-              })}
-            </ul>
-          ))}
-
-        {tab === "memory" &&
-          (memories === null ? (
-            <LoadingRow />
-          ) : memories.length === 0 ? (
-            <EmptyNote>No saved memories yet.</EmptyNote>
-          ) : (
-            <ul className="flex flex-col">
-              {memories.map((memory) => (
-                <li
-                  key={memory.id}
-                  className="flex items-center gap-3 border-b border-kumo-hairline py-2.5 last:border-b-0"
+        <nav className="flex-1 overflow-y-auto px-2 pb-4" aria-label="Manage sections">
+          <ul className="flex flex-col gap-0.5">
+            {sections.map(({ value, label, icon: Icon, count }) => (
+              <li key={value}>
+                <button
+                  type="button"
+                  aria-current={tab === value ? "page" : undefined}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-start text-sm hover:bg-kumo-tint",
+                    tab === value && "bg-kumo-tint text-kumo-strong",
+                  )}
+                  onClick={() => {
+                    selectTab(value);
+                    onCloseSidebar();
+                  }}
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm break-words">{memory.content}</p>
-                    <p className="mt-0.5 text-xs text-kumo-subtle">
-                      Updated {formatWhen(memory.updatedAt)}
-                    </p>
-                  </div>
-                  {memory.permanent && <Badge variant="secondary">permanent</Badge>}
-                  <DeleteButton label="Forget memory" onDelete={() => forgetMemory(memory.id)} />
-                </li>
-              ))}
-            </ul>
-          ))}
+                  <Icon className="size-4 shrink-0 text-kumo-subtle" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  {count !== undefined && <span className="text-xs text-kumo-subtle">{count}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </aside>
 
-        {tab === "connections" && <ConnectionsTab />}
+      <main className="relative h-dvh min-w-0 flex-1 overflow-y-auto">
+        <Button
+          variant="ghost"
+          size="sm"
+          shape="square"
+          icon={SidebarSimpleIcon}
+          className="absolute start-2 top-2 z-20 md:hidden"
+          aria-label="Open manage sections"
+          onClick={onOpenSidebar}
+        />
+        <div className="w-full max-w-3xl px-6 py-6">
+          <header className="mb-5 ps-9 md:ps-0">
+            <h1 className="text-lg font-semibold">{activeSection?.label ?? "Manage"}</h1>
+          </header>
 
-        {tab === "skills" && <SkillsTab />}
-      </div>
-    </div>
+          {update?.updateAvailable === true && update.updateUrl !== undefined && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-kumo-hairline bg-kumo-tint px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">A newer version of this agent is available</p>
+                <p className="mt-0.5 text-xs text-kumo-subtle">
+                  Updating takes a few minutes and keeps your chats, memories, connections,
+                  skills, and settings.
+                  {update.currentVersion !== undefined && update.latestVersion !== undefined && (
+                    <span className="ms-1 font-mono">
+                      {update.currentVersion} &rarr; {update.latestVersion}
+                    </span>
+                  )}
+                </p>
+              </div>
+              <a
+                href={update.updateUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex shrink-0 items-center gap-1 text-sm font-medium text-kumo-interact hover:underline"
+              >
+                Update
+                <ArrowSquareOutIcon className="size-3.5" />
+              </a>
+            </div>
+          )}
+
+          {(tab === "reminders" || tab === "webhooks") && delivery !== null && (
+            <DeliveryPicker delivery={delivery} onChange={changeDelivery} />
+          )}
+
+          {tab === "reminders" &&
+            (reminders === null ? (
+              <LoadingRow />
+            ) : reminders.length === 0 ? (
+              <EmptyNote>
+                No reminders. Try &ldquo;remind me to stretch at 6pm&rdquo; in chat.
+              </EmptyNote>
+            ) : (
+              <ul className="flex flex-col">
+                {reminders.map((reminder) => {
+                  const history = runsFor("reminder", reminder.id);
+                  const expanded = expandedRuns === `reminder:${reminder.id}`;
+                  return (
+                    <li
+                      key={reminder.id}
+                      className="border-b border-kumo-hairline py-2 last:border-b-0"
+                    >
+                      <div className="flex items-center gap-2">
+                        <ExpandCaret
+                          expanded={expanded}
+                          label={`${expanded ? "Hide" : "Show"} run history`}
+                          onToggle={() =>
+                            setExpandedRuns(expanded ? null : `reminder:${reminder.id}`)
+                          }
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm" title={reminder.prompt}>
+                            {reminder.prompt}
+                          </p>
+                          <p className="mt-0.5 text-xs text-kumo-subtle">
+                            Next: {formatWhen(reminder.nextFireAt)}
+                            {reminder.cron !== null && ` · ${reminder.cron} (${reminder.timezone})`}
+                            {history.length > 0 && ` · ran ${history.length}×`}
+                          </p>
+                        </div>
+                        <Badge variant="secondary">
+                          {reminder.cron === null ? "one-off" : "recurring"}
+                        </Badge>
+                        <DeleteButton
+                          label={`Cancel reminder ${reminder.id}`}
+                          onDelete={() => cancelReminder(reminder.id)}
+                        />
+                      </div>
+                      {expanded && <RunHistory runs={history} onOpenThread={onOpenThread} />}
+                    </li>
+                  );
+                })}
+              </ul>
+            ))}
+
+          {tab === "webhooks" &&
+            (webhooks === null ? (
+              <LoadingRow />
+            ) : webhooks.length === 0 ? (
+              <EmptyNote>
+                No event triggers. Ask {AGENT_NAME} to “create a webhook for deploy alerts”.
+              </EmptyNote>
+            ) : (
+              <ul className="flex flex-col">
+                {webhooks.map((hook) => {
+                  const history = runsFor("webhook", hook.id);
+                  const expanded = expandedRuns === `webhook:${hook.id}`;
+                  return (
+                    <li
+                      key={hook.id}
+                      className="border-b border-kumo-hairline py-2 last:border-b-0"
+                    >
+                      <div className="flex items-center gap-2">
+                        <ExpandCaret
+                          expanded={expanded}
+                          label={`${expanded ? "Hide" : "Show"} run history`}
+                          onToggle={() => setExpandedRuns(expanded ? null : `webhook:${hook.id}`)}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm">{hook.name}</p>
+                          <p
+                            className="mt-0.5 truncate text-xs text-kumo-subtle"
+                            title={hook.prompt}
+                          >
+                            {hook.prompt}
+                          </p>
+                          <p className="mt-0.5 text-xs text-kumo-subtle">
+                            Fired {hook.fireCount} {hook.fireCount === 1 ? "time" : "times"} ·
+                            last {formatWhen(hook.lastFiredAt)}
+                          </p>
+                        </div>
+                        <CopyUrlButton url={hook.url} />
+                        <DeleteButton
+                          label={`Delete trigger ${hook.name}`}
+                          onDelete={() => deleteWebhook(hook.id)}
+                        />
+                      </div>
+                      {expanded && <RunHistory runs={history} onOpenThread={onOpenThread} />}
+                    </li>
+                  );
+                })}
+              </ul>
+            ))}
+
+          {tab === "memory" &&
+            (memories === null ? (
+              <LoadingRow />
+            ) : memories.length === 0 ? (
+              <EmptyNote>No saved memories yet.</EmptyNote>
+            ) : (
+              <ul className="flex flex-col">
+                {memories.map((memory) => (
+                  <li
+                    key={memory.id}
+                    className="flex items-center gap-3 border-b border-kumo-hairline py-2.5 last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm break-words">{memory.content}</p>
+                      <p className="mt-0.5 text-xs text-kumo-subtle">
+                        Updated {formatWhen(memory.updatedAt)}
+                      </p>
+                    </div>
+                    {memory.permanent && <Badge variant="secondary">permanent</Badge>}
+                    <DeleteButton label="Forget memory" onDelete={() => forgetMemory(memory.id)} />
+                  </li>
+                ))}
+              </ul>
+            ))}
+
+          {tab === "connections" && <ConnectionsTab />}
+
+          {tab === "skills" && <SkillsTab />}
+
+          {tab === "computer" && <ComputerViewer />}
+
+          {tab === "card" && <CardPanel />}
+
+          {tab === "imessage" && <IMessagePanel />}
+        </div>
+      </main>
+    </>
   );
 }
