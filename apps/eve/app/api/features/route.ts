@@ -1,3 +1,4 @@
+import { orgoConfigured } from "@/agent/lib/orgo";
 import { requireWebAuth } from "@/lib/web-auth";
 
 // Which optional capabilities this deployment actually has, so the UI can
@@ -11,10 +12,18 @@ const ALL_FEATURES = [
   "proactive",
   "receipts",
   "skills",
+  "artifacts",
   "file-sharing",
   "integrations",
   "browser",
+  "computer",
   "utilities",
+  "email",
+  "card",
+  "imessage",
+  "phone",
+  "slack",
+  "voice",
 ] as const;
 
 function enabledSet(): Set<string> {
@@ -43,5 +52,33 @@ export async function GET(request: Request): Promise<Response> {
     proactive: on.has("proactive"),
     integrations: on.has("integrations") && hasEnv("COMPOSIO_API_KEY"),
     skills: on.has("skills") && hasEnv("BLOB_READ_WRITE_TOKEN"),
+    artifacts:
+      on.has("artifacts") &&
+      hasEnv("DATABASE_URL") &&
+      (hasEnv("BLOB_READ_WRITE_TOKEN") ||
+        (hasEnv("VERCEL_OIDC_TOKEN") && hasEnv("BLOB_STORE_ID"))),
+    artifactsAvailable: on.has("artifacts"),
+    // Not gated on AGENTMAIL_API_KEY: the email page is where you find out you
+    // need one, so hiding it until the key exists would hide the instructions.
+    email: on.has("email"),
+    // Configured means a key exists (environment or app settings); available
+    // means the deployment ships the feature at all. The manage tab shows on
+    // available so a key can be added there in the first place.
+    computer: on.has("computer") && (await orgoConfigured()),
+    computerAvailable: on.has("computer"),
+    // Availability only: the card tab is where the Agentcard connection is
+    // made, so hiding it until one exists would hide the way to make one.
+    cardAvailable: on.has("card"),
+    // Same idea: the iMessage tab is where pairing happens.
+    imessageAvailable: on.has("imessage"),
+    // And the phone tab is where the key is pasted and the number bought.
+    phoneAvailable: on.has("phone"),
+    // Configured gates the delivery option (a Connect client means the channel
+    // has credentials); available gates the tab, which is where reaction rules
+    // are written — hiding it until Connect is set up would hide half the
+    // reason to set Connect up.
+    slack: on.has("slack") && hasEnv("SLACK_CONNECT_CLIENT_ID"),
+    slackAvailable: on.has("slack"),
+    voice: on.has("voice") && hasEnv("OPENAI_API_KEY"),
   });
 }
