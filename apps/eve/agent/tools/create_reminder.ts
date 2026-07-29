@@ -7,6 +7,7 @@ import {
   createReminder,
   nextCronOccurrence,
 } from "../lib/reminders-db";
+import { ownerOnly } from "../lib/owner-gate";
 
 function telegramChatId(attributes: Record<string, unknown>): string | null {
   const chatId = attributes.chat_id;
@@ -14,6 +15,7 @@ function telegramChatId(attributes: Record<string, unknown>): string | null {
 }
 
 export default defineTool({
+  approval: ownerOnly,
   description: `Schedule a proactive reminder or task. ${agentName()} wakes up at the given time (one-off) or on the cron cadence (recurring), performs the prompt, and messages ${ownerName()} on Telegram. Use for 'remind me to X at 9pm', 'every weekday morning send me my schedule', or any future/recurring task.`,
   inputSchema: z.object({
     prompt: z
