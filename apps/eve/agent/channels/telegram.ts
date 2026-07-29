@@ -1,5 +1,7 @@
 import { defaultTelegramAuth, telegramChannel } from "eve/channels/telegram";
 
+import { rememberOwnerTelegramChat } from "../lib/delivery";
+
 // Credentials come from TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET_TOKEN.
 // The webhook route is mounted at POST /eve/v1/telegram.
 //
@@ -27,6 +29,10 @@ export default telegramChannel({
 
     const hasContent = (message.text || message.caption).trim().length > 0 || message.attachments.length > 0;
     if (!hasContent) return null;
+
+    // Remember the owner's DM so web-created reminders and triggers can
+    // deliver to Telegram when the owner picks it in Manage.
+    await rememberOwnerTelegramChat(message.chat.id);
 
     await ctx.telegram.startTyping();
     return { auth: defaultTelegramAuth(message) };
