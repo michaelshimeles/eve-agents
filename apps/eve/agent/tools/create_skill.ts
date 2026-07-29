@@ -1,8 +1,10 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { skillStore } from "../lib/skill-store";
+import { ownerOnly } from "../lib/owner-gate";
 
 export default defineTool({
+  approval: ownerOnly,
   description:
     "Create or update a reusable skill: a named procedure you will follow in future conversations. Use when the user describes a repeatable workflow, routine, or format they want you to apply again later (e.g. how to run their weekly review). Saving with an existing name overwrites that skill. The skill takes effect in new conversations from then on.",
   inputSchema: z.object({
