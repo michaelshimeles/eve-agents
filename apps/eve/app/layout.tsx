@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
 import type { ReactNode } from "react";
+import { VoiceOrb } from "@/components/voice-orb";
 import { AGENT_NAME } from "@/lib/identity";
 import { cn } from "@/lib/utils";
 import "./globals.css";
@@ -33,7 +34,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       data-mode="dark"
       className={cn("font-sans", inter.variable, geist.variable, geistMono.variable)}
     >
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        <VoiceOrb />
+      </body>
     </html>
   );
 }
