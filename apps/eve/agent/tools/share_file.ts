@@ -1,14 +1,18 @@
-import { put } from "@vercel/blob";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { ownerOnly } from "../lib/owner-gate";
+
+import { uploadForSharing } from "../lib/blob-share";
 
 // Bridges the sandbox filesystem to Micky: the sandbox is invisible to him,
 // so files the agent creates there (reports, exports, images, archives) get
-// uploaded to public Vercel Blob storage and handed over as a download link.
+// uploaded to Vercel Blob storage and handed over as a download link —
+// permanent on public stores, presigned with an expiry on private ones.
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
 export default defineTool({
+  approval: ownerOnly,
   description:
     "Share a file from your sandbox with Micky: uploads it to file storage and returns a public download URL. Use this whenever you create a file he should receive (a report, CSV export, image, PDF, zip) instead of pasting its contents into chat. Give him the returned URL as a markdown link.",
   inputSchema: z.object({
@@ -34,17 +38,20 @@ export default defineTool({
     }
 
     const name = path.split("/").filter(Boolean).at(-1) ?? "file";
-    const blob = await put(`shared/${name}`, Buffer.from(bytes), {
-      access: "public",
-      addRandomSuffix: true,
+    const shared = await uploadForSharing({
+      pathname: `shared/${name}`,
+      data: Buffer.from(bytes),
       ...(contentType !== undefined ? { contentType } : {}),
     });
 
     return {
-      url: blob.url,
+      url: shared.url,
       filename: name,
       sizeBytes: bytes.byteLength,
-      note: "Public URL - anyone with the link can download it.",
+      note:
+        shared.expiresAt === null
+          ? "Public URL - anyone with the link can download it."
+          : `Anyone with the link can download it until ${shared.expiresAt} (the store is private, so the link expires). Send or use it now.`,
     };
   },
 });
