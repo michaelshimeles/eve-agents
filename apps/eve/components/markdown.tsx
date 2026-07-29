@@ -1,7 +1,14 @@
 "use client";
 
 import { CheckIcon, CopyIcon, EyeIcon, EyeSlashIcon } from "@phosphor-icons/react";
-import { isValidElement, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import {
+  isValidElement,
+  memo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRemarkPlugins, Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
@@ -132,7 +139,13 @@ const bareComponents: Components = {
   ),
 };
 
-export function Markdown({ children, className }: { children: string; className?: string }) {
+export const Markdown = memo(function Markdown({
+  children,
+  className,
+}: {
+  children: string;
+  className?: string;
+}) {
   return (
     <Streamdown
       className={cn("typeset typeset-docs max-w-[37em]", className)}
@@ -142,4 +155,4 @@ export function Markdown({ children, className }: { children: string; className?
       {children}
     </Streamdown>
   );
-}
+});
