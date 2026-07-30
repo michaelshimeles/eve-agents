@@ -2,10 +2,16 @@ import { timingSafeEqual } from "node:crypto";
 
 import { defineChannel, POST } from "eve/channels";
 
+import { resolveDeliveryRoute } from "../lib/delivery";
+import { notifyOwnerOverIMessage } from "../lib/effect/imessage";
+import { runTool } from "../lib/effect/runtime";
 import { ownerName } from "../lib/owner";
 import { recordAutomationRun } from "../lib/runs-db";
 import { deliverToWebChatThread } from "../lib/web-thread-delivery";
 import { getWebhook, recordWebhookFire, type WebhookRow } from "../lib/webhooks-db";
+import agentphone from "./agentphone";
+import imessage from "./imessage";
+import slack from "./slack";
 import telegram from "./telegram";
 
 // Event triggers: inbound webhooks that wake the agent when something happens
@@ -13,6 +19,8 @@ import telegram from "./telegram";
 // minted from chat with the create_webhook tool; rows live in Neon
 // (lib/webhooks-db.ts). Mounted at POST /eve/v1/hooks/:hookId/:secret - the
 // secret rides in the path because most services can only be given a bare URL.
+// Results deliver per the owner's preference (lib/delivery.ts), same as
+// reminders: where the hook was created by default, or one pinned place.
 
 const MAX_PAYLOAD_CHARS = 6000;
 
@@ -65,19 +73,58 @@ export default defineChannel({
         (async () => {
           try {
             let threadId: string | undefined;
-            if (hook.chat_id !== null) {
+            const route = await resolveDeliveryRoute(hook.chat_id);
+            const auth = {
+              authenticator: "webhook",
+              principalType: "service" as const,
+              principalId: `webhook:${hook.id}`,
+              attributes: { webhook_id: hook.id, webhook_name: hook.name },
+            };
+            if (route.kind === "telegram") {
               await receive(telegram, {
                 message,
-                target: { chatId: hook.chat_id },
-                auth: {
-                  authenticator: "webhook",
-                  principalType: "service",
-                  principalId: `webhook:${hook.id}`,
-                  attributes: { webhook_id: hook.id, webhook_name: hook.name },
-                },
+                target: { chatId: route.chatId },
+                auth,
+              });
+            } else if (route.kind === "imessage") {
+              // The session runs in the owner's iMessage conversation, so a
+              // reply text continues it.
+              await receive(imessage, {
+                message,
+                target: { handle: route.handle },
+                auth,
+              });
+            } else if (route.kind === "slack") {
+              // The session runs in the owner's Slack DM, so a reply in that
+              // thread continues it.
+              await receive(slack, {
+                message,
+                target: { channelId: route.channelId },
+                auth,
+              });
+            } else if (route.kind === "phone") {
+              // The session runs in the owner's text thread, so a reply
+              // continues it.
+              await receive(agentphone, {
+                message,
+                target: { target: route.target },
+                auth,
               });
             } else {
-              threadId = await deliverToWebChatThread(`Webhook: ${hook.name}`, message, "webhook");
+              const delivery = await deliverToWebChatThread(`Webhook: ${hook.name}`, message, "webhook");
+              threadId = delivery.threadId;
+              // Best-effort, like the web push: the thread is already
+              // persisted, so an iMessage failure must not fail the delivery
+              // — the sender would retry and create a duplicate thread.
+              if (route.mirror) {
+                try {
+                  await runTool(
+                    notifyOwnerOverIMessage(delivery.reply ?? `Webhook "${hook.name}" fired.`),
+                  );
+                } catch (error) {
+                  console.error(`Webhook ${hook.id} iMessage notification failed.`, error);
+                }
+              }
             }
             await recordAutomationRun({
               kind: "webhook",
