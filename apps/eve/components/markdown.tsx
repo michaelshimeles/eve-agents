@@ -1,9 +1,20 @@
 "use client";
 
 import { CheckIcon, CopyIcon, EyeIcon, EyeSlashIcon } from "@phosphor-icons/react";
-import { isValidElement, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import {
+  isValidElement,
+  memo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRemarkPlugins, Streamdown, type Components } from "streamdown";
+import {
+  artifactIdFromHref,
+  openArtifactWorkspace,
+} from "@/lib/artifact-client";
 import { cn } from "@/lib/utils";
 
 // Chat replies often separate list-like lines with single newlines, which
@@ -125,14 +136,59 @@ const bareComponents: Components = {
   hr: "hr",
   sup: "sup",
   sub: "sub",
-  a: ({ node: _node, children, ...props }: ComponentProps<"a"> & { node?: unknown }) => (
-    <a target="_blank" rel="noreferrer" {...props}>
-      {children}
-    </a>
-  ),
+  a: ({
+    node: _node,
+    children,
+    href,
+    onClick,
+    target: _target,
+    ...props
+  }: ComponentProps<"a"> & { node?: unknown }) => {
+    // Agent-generated artifact links are relative. Avoid advertising them as
+    // new-tab links during SSR; the click-time check below also handles an
+    // absolute same-origin URL safely.
+    const relativeArtifactId =
+      href === undefined
+        ? null
+        : artifactIdFromHref(href, "https://ruth-artifact-link.invalid");
+    return (
+      <a
+        {...props}
+        href={href}
+        target={relativeArtifactId === null ? "_blank" : undefined}
+        rel={relativeArtifactId === null ? "noreferrer" : undefined}
+        onClick={(event) => {
+          onClick?.(event);
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey ||
+            href === undefined
+          ) {
+            return;
+          }
+          const artifactId = artifactIdFromHref(href, window.location.origin);
+          if (artifactId === null) return;
+          event.preventDefault();
+          openArtifactWorkspace(artifactId);
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
 };
 
-export function Markdown({ children, className }: { children: string; className?: string }) {
+export const Markdown = memo(function Markdown({
+  children,
+  className,
+}: {
+  children: string;
+  className?: string;
+}) {
   return (
     <Streamdown
       className={cn("typeset typeset-docs max-w-[37em]", className)}
@@ -142,4 +198,4 @@ export function Markdown({ children, className }: { children: string; className?
       {children}
     </Streamdown>
   );
-}
+});
