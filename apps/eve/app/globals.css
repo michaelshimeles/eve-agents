@@ -17,6 +17,7 @@
 }
 
 :root {
+  color-scheme: light;
   /* Bridge legacy variable names used by typeset.css onto Kumo tokens. */
   --color-foreground: var(--text-color-kumo-default);
   --color-muted-foreground: var(--text-color-kumo-subtle);
@@ -25,6 +26,10 @@
   --color-primary: var(--color-kumo-brand);
   --color-ring: var(--color-kumo-focus);
   --radius: 0.5rem;
+}
+
+:root[data-mode="dark"] {
+  color-scheme: dark;
 }
 
 @layer base {
