@@ -2,8 +2,10 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { cancelReminder } from "../lib/reminders-db";
+import { ownerOnly } from "../lib/owner-gate";
 
 export default defineTool({
+  approval: ownerOnly,
   description:
     "Cancel an active reminder or recurring scheduled task by id (find it with list_reminders). Cancelling a recurring task stops all future runs.",
   inputSchema: z.object({
