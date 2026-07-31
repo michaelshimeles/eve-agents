@@ -5,9 +5,12 @@ import {
   BellIcon,
   BellSlashIcon,
   ChatCircleIcon,
+  EnvelopeIcon,
+  FilesIcon,
   GearSixIcon,
   MagnifyingGlassIcon,
   PlusIcon,
+  TerminalWindowIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -72,6 +75,9 @@ export function CommandPalette({
   onSelectThread,
   onNewChat,
   onOpenManage,
+  onOpenEmail,
+  onOpenFiles,
+  onOpenWorkspace,
   pushStatus,
   onTogglePush,
 }: {
@@ -81,6 +87,10 @@ export function CommandPalette({
   onSelectThread: (id: string) => void;
   onNewChat: () => void;
   onOpenManage: () => void;
+  /** Omitted when this deployment has no email surface. */
+  onOpenEmail?: () => void;
+  onOpenFiles: () => void;
+  onOpenWorkspace: () => void;
   /** "on" | "off" | "denied" | "unsupported" | "loading" from usePushNotifications. */
   pushStatus: string;
   onTogglePush: () => void;
@@ -122,6 +132,43 @@ export function CommandPalette({
         icon: <GearSixIcon className="size-4" />,
         run: () => {
           onOpenManage();
+          onClose();
+        },
+      },
+      ...(onOpenEmail !== undefined
+        ? [
+            {
+              key: "action:email",
+              kind: "action" as const,
+              label: "Open email",
+              detail: "The agent's own inbox: read, search, send, reply",
+              icon: <EnvelopeIcon className="size-4" />,
+              run: () => {
+                onOpenEmail();
+                onClose();
+              },
+            },
+          ]
+        : []),
+      {
+        key: "action:files",
+        kind: "action",
+        label: "Open files",
+        detail: "Images and files uploaded in chat",
+        icon: <FilesIcon className="size-4" />,
+        run: () => {
+          onOpenFiles();
+          onClose();
+        },
+      },
+      {
+        key: "action:workspace",
+        kind: "action",
+        label: "Open workspace",
+        detail: "Files, terminals, processes, ports, and sandbox controls",
+        icon: <TerminalWindowIcon className="size-4" />,
+        run: () => {
+          onOpenWorkspace();
           onClose();
         },
       },
@@ -185,7 +232,20 @@ export function CommandPalette({
     );
 
     return list;
-  }, [query, threads, hits, pushStatus, onNewChat, onOpenManage, onTogglePush, onSelectThread, onClose]);
+  }, [
+    query,
+    threads,
+    hits,
+    pushStatus,
+    onNewChat,
+    onOpenManage,
+    onOpenEmail,
+    onOpenFiles,
+    onOpenWorkspace,
+    onTogglePush,
+    onSelectThread,
+    onClose,
+  ]);
 
   const active = Math.min(activeIndex, Math.max(0, entries.length - 1));
 
