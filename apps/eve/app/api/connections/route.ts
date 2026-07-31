@@ -1,4 +1,9 @@
-import { CANDIDATE_TOOLKITS, manageConnections } from "@/lib/composio-connect";
+import {
+  FALLBACK_TOOLKITS,
+  listComposioToolkits,
+  manageConnections,
+  mergeComposioToolkitCatalogs,
+} from "@/lib/composio-connect";
 import { requireWebAuth } from "@/lib/web-auth";
 
 // Connections manager: which Composio apps are linked, plus connect (returns
@@ -30,18 +35,29 @@ function accountLabel(info: Record<string, unknown> | undefined): string | null 
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
 
   try {
+    let catalogComplete = true;
+    const toolkits = await listComposioToolkits().catch((error: unknown) => {
+      catalogComplete = false;
+      console.error("Composio toolkit catalog failed:", error);
+      return [...FALLBACK_TOOLKITS];
+    });
+    // Query the union so renamed or removed apps can still surface an existing
+    // account, while the picker itself follows the current live catalog.
+    const checkedToolkits = mergeComposioToolkitCatalogs(FALLBACK_TOOLKITS, toolkits);
     const data = await manageConnections(
-      CANDIDATE_TOOLKITS.map((name) => ({ name, action: "list" as const })),
+      checkedToolkits.map(({ slug }) => ({ name: slug, action: "list" as const })),
     );
     const results = (data.results ?? {}) as Record<string, ToolkitResult>;
+    const names = new Map(checkedToolkits.map((toolkit) => [toolkit.slug, toolkit.name]));
     const connections = Object.values(results)
       .filter((entry) => (entry.accounts?.length ?? 0) > 0)
       .map((entry) => ({
         toolkit: entry.toolkit ?? "",
+        name: names.get(entry.toolkit ?? "") ?? entry.toolkit ?? "",
         accounts: (entry.accounts ?? []).map((account) => ({
           id: account.id ?? "",
           status: account.status ?? "unknown",
@@ -49,7 +65,7 @@ export async function GET(request: Request): Promise<Response> {
           label: accountLabel(account.user_info),
         })),
       }));
-    return Response.json({ connections, checked: CANDIDATE_TOOLKITS });
+    return Response.json({ connections, toolkits, catalogComplete });
   } catch (error) {
     console.error("Connections list failed:", error);
     return new Response("Connections unavailable", { status: 502 });
@@ -57,7 +73,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
 
   const body = (await request.json().catch(() => null)) as { toolkit?: unknown } | null;
@@ -80,7 +96,7 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
 
   const body = (await request.json().catch(() => null)) as {

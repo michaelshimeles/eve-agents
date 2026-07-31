@@ -2,14 +2,14 @@ import { memoryStore } from "@/agent/lib/memory-store";
 import { requireWebAuth } from "@/lib/web-auth";
 
 export async function GET(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const memories = await memoryStore.list();
   return Response.json({ memories });
 }
 
 export async function DELETE(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { id?: unknown } | null;
   if (body === null || typeof body.id !== "string" || body.id.length === 0) {
