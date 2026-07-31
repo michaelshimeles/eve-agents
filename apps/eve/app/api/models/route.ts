@@ -1,20 +1,21 @@
-import { gateway } from "ai";
+import {
+  FALLBACK_DEFAULT_MODEL_ID,
+  getGatewayModelCatalog,
+} from "@/agent/lib/gateway-models";
 
 export async function GET() {
   try {
-    const { models } = await gateway.getAvailableModels();
-    const language = models
-      .filter((model) => (model.modelType ?? "language") === "language")
-      .map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: model.description ?? null,
-        pricing: model.pricing
-          ? { input: model.pricing.input, output: model.pricing.output }
-          : null,
-      }));
-    return Response.json({ models: language });
+    const catalog = await getGatewayModelCatalog();
+    return Response.json({
+      models: catalog.models,
+      defaultModel: catalog.defaultModel,
+    });
   } catch {
-    return Response.json({ models: [] });
+    // Picker shows "unavailable" when models is empty; keep a default so a
+    // saved selection can still fall back cleanly.
+    return Response.json({
+      models: [],
+      defaultModel: FALLBACK_DEFAULT_MODEL_ID,
+    });
   }
 }

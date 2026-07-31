@@ -47,7 +47,7 @@ async function fetchLatestTemplate(builderUrl: string): Promise<LatestTemplate |
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied !== null) return denied;
 
   const currentReleaseRaw = process.env.EVE_TEMPLATE_RELEASE ?? "";
