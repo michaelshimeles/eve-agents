@@ -2,6 +2,7 @@
 @source "../../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
+@import "@wterm/react/css";
 @import "./typeset.css";
 /* Utility-only import (shimmer, scroll-fade, scrollbar helpers) used by the
    chat message scroller and attachments. Defines no color tokens. */
@@ -17,6 +18,7 @@
 }
 
 :root {
+  color-scheme: light;
   /* Bridge legacy variable names used by typeset.css onto Kumo tokens. */
   --color-foreground: var(--text-color-kumo-default);
   --color-muted-foreground: var(--text-color-kumo-subtle);
@@ -25,6 +27,10 @@
   --color-primary: var(--color-kumo-brand);
   --color-ring: var(--color-kumo-focus);
   --radius: 0.5rem;
+}
+
+:root[data-mode="dark"] {
+  color-scheme: dark;
 }
 
 @layer base {

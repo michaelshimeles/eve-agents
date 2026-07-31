@@ -1,4 +1,10 @@
 {
   "framework": "nextjs",
-  "outputDirectory": null
+  "outputDirectory": null,
+  "crons": [
+    {
+      "path": "/api/imessage/events",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }
