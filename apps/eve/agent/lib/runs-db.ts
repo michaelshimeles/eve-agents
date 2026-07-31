@@ -1,4 +1,4 @@
-import { db } from "./receipts-db";
+import { db } from "./neon";
 
 // Run history for proactive automations. Every reminder fire and webhook
 // event appends a row here, so the management panel can show what actually
