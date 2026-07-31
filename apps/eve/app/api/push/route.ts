@@ -2,7 +2,7 @@ import { deleteSubscription, parseSubscription, saveSubscription } from "@/lib/p
 import { requireWebAuth } from "@/lib/web-auth";
 
 export async function POST(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const subscription = parseSubscription(await request.json().catch(() => null));
   if (subscription === null) {
@@ -13,7 +13,7 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { endpoint?: unknown } | null;
   if (body === null || typeof body.endpoint !== "string") {
