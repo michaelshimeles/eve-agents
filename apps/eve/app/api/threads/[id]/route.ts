@@ -1,10 +1,16 @@
-import { deleteThread, getThreadChat, upsertThread, upsertThreadMeta } from "@/lib/threads-db";
+import {
+  deleteThread,
+  getThreadChat,
+  upsertThread,
+  upsertThreadMeta,
+  type ThreadOrigin,
+} from "@/lib/threads-db";
 import { requireWebAuth } from "@/lib/web-auth";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, ctx: RouteContext): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const { id } = await ctx.params;
   const chat = await getThreadChat(id);
@@ -13,7 +19,7 @@ export async function GET(request: Request, ctx: RouteContext): Promise<Response
 }
 
 export async function PUT(request: Request, ctx: RouteContext): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const { id } = await ctx.params;
   const body = (await request.json().catch(() => null)) as {
@@ -33,9 +39,13 @@ export async function PUT(request: Request, ctx: RouteContext): Promise<Response
     pinned: body.pinned === true,
     renamed: body.renamed === true,
     // Origin only matters on first insert; existing rows keep theirs.
-    origin: (body.origin === "reminder" || body.origin === "webhook"
+    origin: (body.origin === "reminder" ||
+    body.origin === "webhook" ||
+    body.origin === "email" ||
+    body.origin === "notification" ||
+    body.origin === "voice"
       ? body.origin
-      : "web") as "web" | "reminder" | "webhook",
+      : "web") as ThreadOrigin,
   };
   // Meta-only updates (rename, pin) omit the chat payload to leave it intact.
   if (typeof body.chat === "object" && body.chat !== null) {
@@ -47,7 +57,7 @@ export async function PUT(request: Request, ctx: RouteContext): Promise<Response
 }
 
 export async function DELETE(request: Request, ctx: RouteContext): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const { id } = await ctx.params;
   await deleteThread(id);

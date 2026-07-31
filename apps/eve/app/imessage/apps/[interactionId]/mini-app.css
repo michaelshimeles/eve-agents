@@ -1,0 +1,162 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  background: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #f3f3f1;
+  color: #171717;
+}
+
+.card {
+  width: min(100%, 520px);
+  padding: 22px;
+  border: 1px solid rgb(0 0 0 / 10%);
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 8%);
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #737373;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(24px, 7vw, 36px);
+  line-height: 1.05;
+  letter-spacing: -.03em;
+}
+
+.description,
+.complete,
+.sensitive,
+.error {
+  line-height: 1.45;
+}
+
+.actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.owner-auth {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.owner-auth input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 12px 14px;
+  font: inherit;
+}
+
+.owner-auth input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 50px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 14px;
+  background: #171717;
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+}
+
+button:disabled {
+  opacity: .55;
+}
+
+button small {
+  font-weight: 400;
+  opacity: .72;
+}
+
+.progress {
+  height: 8px;
+  margin-top: 20px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6e6e3;
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #171717;
+}
+
+.sensitive {
+  color: #7a4a00;
+  font-size: 13px;
+}
+
+.error {
+  color: #b42318;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button {
+    transition: transform 120ms ease, opacity 120ms ease;
+  }
+
+  button:active {
+    transform: scale(.985);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #111;
+    color: #f5f5f5;
+  }
+
+  .card {
+    border-color: rgb(255 255 255 / 12%);
+    background: #1c1c1e;
+    box-shadow: none;
+  }
+
+  button,
+  .progress span {
+    background: #f5f5f5;
+    color: #171717;
+  }
+
+  .progress {
+    background: #343436;
+  }
+}

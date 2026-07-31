@@ -2,7 +2,7 @@ import type { LanguageModelMiddleware, ModelMessage } from "ai";
 import { gateway, wrapLanguageModel } from "ai";
 import { defineAgent, defineDynamic } from "eve";
 
-const DEFAULT_MODEL = "anthropic/claude-sonnet-5";
+import { FALLBACK_DEFAULT_MODEL_ID, getDefaultModelId } from "./lib/gateway-models";
 
 const MODEL_ID_PATTERN = /^[\w.-]+\/[\w.:-]+$/;
 
@@ -79,20 +79,43 @@ function reasoningMiddleware(reasoning: ReasoningLevel): LanguageModelMiddleware
 }
 
 export default defineAgent({
+  build: {
+    // Remotion's bundler/renderer pull in webpack/rspack and platform
+    // binaries (headless shell, compositor) that must stay external; eve
+    // traces them into the hosted output instead of bundling them.
+    // heif2jpeg is a native addon (HEIC photo conversion for iMessage
+    // attachments) with the same constraint.
+    externalDependencies: ["remotion", "@remotion/bundler", "@remotion/renderer", "heif2jpeg"],
+  },
+  limits: {
+    // Ruth is a long-lived personal assistant. Do not interrupt an otherwise
+    // healthy session with eve's default cumulative input-token budget.
+    // Anonymous HTTP calls are budgeted across sessions in channels/eve.ts.
+    maxInputTokensPerSession: false,
+  },
   model: defineDynamic({
-    fallback: DEFAULT_MODEL,
+    // Compile-time anchor + last resort when the live catalog is unreachable.
+    // Prefer getDefaultModelId() at turn start so new Sonnet drops land
+    // without bumping this string.
+    fallback: FALLBACK_DEFAULT_MODEL_ID,
     events: {
-      "turn.started": (_event, ctx) => requestedSettings(ctx.messages).model,
+      "turn.started": async (_event, ctx) => {
+        const requested = requestedSettings(ctx.messages).model;
+        if (requested !== null) return requested;
+        // Channels without a picker (Telegram, schedules) ride the newest
+        // preferred family from the Gateway catalog.
+        return getDefaultModelId();
+      },
       // Reasoning effort is a per-call AI SDK setting, not a field the dynamic
       // model selection object accepts, so a requested level rides on a live
       // gateway model wrapped with default settings. Live models are only
       // allowed from step.started; with no level requested this returns null
       // and the turn-scoped string selection (plain prompt-cache path) wins.
-      "step.started": (_event, ctx) => {
+      "step.started": async (_event, ctx) => {
         const { model, reasoning } = requestedSettings(ctx.messages);
         if (reasoning === null) return null;
         return wrapLanguageModel({
-          model: gateway(model ?? DEFAULT_MODEL),
+          model: gateway(model ?? (await getDefaultModelId())),
           middleware: reasoningMiddleware(reasoning),
         });
       },
