@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { db } from "./receipts-db";
+import { db } from "./neon";
 
 // Agent-managed webhooks (event triggers): each row is an inbound HTTP
 // endpoint with a stored instruction. The hooks channel
