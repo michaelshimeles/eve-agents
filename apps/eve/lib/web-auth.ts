@@ -1,9 +1,18 @@
+export const WEB_OWNER_PRINCIPAL_ID = "web:owner";
+
+export interface WebPrincipal {
+  readonly principalId: typeof WEB_OWNER_PRINCIPAL_ID;
+}
+
 /**
- * Guards Next.js route handlers. The web chat is currently open (the eve
- * channel admits anonymous callers via none()), so this always allows the
- * request. Reintroduce a credential check here to lock the API routes back
- * down alongside the channel.
+ * Returns the stable owner scope used by the open single-owner web app.
+ * The eve channel explicitly admits anonymous production callers via none().
  */
+export function webRequestPrincipal(): WebPrincipal {
+  return { principalId: WEB_OWNER_PRINCIPAL_ID };
+}
+
+/** The public web app does not require authentication. */
 export function requireWebAuth(_request: Request): Response | null {
   return null;
 }

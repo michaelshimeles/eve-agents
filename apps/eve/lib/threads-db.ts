@@ -1,7 +1,9 @@
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
+import { WEB_OWNER_PRINCIPAL_ID } from "@/lib/web-auth";
+
 // Lazy init: DATABASE_URL may be absent at build time (same pattern as
-// agent/lib/receipts-db.ts).
+// agent/lib/neon.ts).
 let _sql: NeonQueryFunction<false, false> | null = null;
 let ensured: Promise<void> | null = null;
 
@@ -32,12 +34,19 @@ async function ensureTable(): Promise<void> {
       ALTER TABLE web_chat_threads
         ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'web'
     `;
+    await sql()`
+      ALTER TABLE web_chat_threads
+        ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT 'web:owner'
+    `;
   })();
   await ensured;
 }
 
-/** Who started the thread: the user, a fired reminder, or a webhook event. */
-export type ThreadOrigin = "web" | "reminder" | "webhook";
+/**
+ * Who started the thread: the user, a fired reminder, a webhook event, mail
+ * arriving in the agent's own inbox, or an answered approval notification.
+ */
+export type ThreadOrigin = "web" | "reminder" | "webhook" | "email" | "notification" | "voice";
 
 export interface ThreadMetaRow {
   title: string;
@@ -52,7 +61,9 @@ export interface ThreadRow extends ThreadMetaRow {
 }
 
 function toOrigin(value: unknown): ThreadOrigin {
-  return value === "reminder" || value === "webhook" ? value : "web";
+  return value === "reminder" || value === "webhook" || value === "email" || value === "notification" || value === "voice"
+    ? value
+    : "web";
 }
 
 export async function listThreads(): Promise<ThreadRow[]> {
@@ -132,8 +143,37 @@ export async function getThreadChat(id: string): Promise<unknown | null> {
   return rows.length > 0 ? rows[0].chat : null;
 }
 
+/**
+ * Proves that an Eve session is attached to a conversation owned by the
+ * authenticated web principal. Workspace APIs call this before they resolve
+ * any deterministic Sandbox tags, so knowing a session id is never enough to
+ * read or control its filesystem.
+ */
+export async function workspaceSessionOwnedBy(
+  ownerId: typeof WEB_OWNER_PRINCIPAL_ID,
+  sessionId: string,
+): Promise<boolean> {
+  await ensureTable();
+  const rows = await sql()`
+    SELECT 1
+      FROM web_chat_threads
+     WHERE owner_id = ${ownerId}
+       AND chat->'session'->>'sessionId' = ${sessionId}
+     LIMIT 1
+  `;
+  return rows.length > 0;
+}
+
 // Origin is written once on insert and never updated: rename/pin/chat writes
 // from the UI must not reset a reminder/webhook thread back to "web".
+//
+// The update is conditional on the incoming event log being at least as long
+// as the stored one. A thread's event log only ever grows (eve sessions are
+// append-only and the client always writes the full log), so length is a
+// writer-clock-independent version: a delayed retry, a slower tab, or a
+// device with a skewed clock can never clobber a longer transcript with a
+// shorter one, no matter what timestamp it carries. Equal lengths still
+// apply, keeping retries and meta-refresh writes idempotent.
 export async function upsertThread(
   id: string,
   meta: ThreadMetaRow,
@@ -150,6 +190,8 @@ export async function upsertThread(
           pinned = EXCLUDED.pinned,
           renamed = EXCLUDED.renamed,
           chat = EXCLUDED.chat
+      WHERE jsonb_array_length(coalesce(web_chat_threads.chat->'events', '[]'::jsonb))
+         <= jsonb_array_length(coalesce(EXCLUDED.chat->'events', '[]'::jsonb))
   `;
 }
 
