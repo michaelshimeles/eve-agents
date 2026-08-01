@@ -1,23 +1,40 @@
+import {
+  deliveryView,
+  isDeliveryTarget,
+  setDeliveryTarget,
+  type DeliveryView,
+} from "@/agent/lib/delivery";
 import { cancelReminder, listReminders } from "@/agent/lib/reminders-db";
 import { listRecentRuns } from "@/agent/lib/runs-db";
 import { deleteWebhook, listWebhooks, webhookUrl } from "@/agent/lib/webhooks-db";
 import { requireWebAuth } from "@/lib/web-auth";
 
 // Management surface for the web UI: what Ruth has scheduled (reminders), what
-// can wake her (webhooks), and what happened when they fired (runs), with
-// delete. Mirrors the chat tools (list_reminders, cancel_reminder,
-// list_webhooks, delete_webhook) so the panel and the agent always agree.
+// can wake her (webhooks), what happened when they fired (runs), and where
+// results get delivered (PUT), with delete. Mirrors the chat tools
+// (list_reminders, cancel_reminder, list_webhooks, delete_webhook) so the
+// panel and the agent always agree.
+
+const DELIVERY_FALLBACK: DeliveryView = {
+  target: "origin",
+  telegramLinked: false,
+  imessagePaired: false,
+  slackLinked: false,
+  phoneReady: false,
+};
 
 export async function GET(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
 
-  const [reminders, webhooks, runs] = await Promise.all([
+  const [reminders, webhooks, runs, delivery] = await Promise.all([
     listReminders(),
     listWebhooks(),
     listRecentRuns().catch(() => []),
+    deliveryView().catch(() => DELIVERY_FALLBACK),
   ]);
   return Response.json({
+    delivery,
     reminders: reminders.map((reminder) => ({
       id: reminder.id,
       prompt: reminder.prompt,
@@ -46,8 +63,28 @@ export async function GET(request: Request): Promise<Response> {
   });
 }
 
+/** Save the delivery preference for reminder and trigger results. */
+export async function PUT(request: Request): Promise<Response> {
+  const denied = await requireWebAuth(request);
+  if (denied) return denied;
+
+  const body = (await request.json().catch(() => null)) as { delivery?: unknown } | null;
+  if (body === null || !isDeliveryTarget(body.delivery)) {
+    return new Response("Invalid body", { status: 400 });
+  }
+  try {
+    await setDeliveryTarget(body.delivery);
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Could not save the preference." },
+      { status: 400 },
+    );
+  }
+  return Response.json({ ok: true, delivery: await deliveryView().catch(() => DELIVERY_FALLBACK) });
+}
+
 export async function DELETE(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
 
   const body = (await request.json().catch(() => null)) as

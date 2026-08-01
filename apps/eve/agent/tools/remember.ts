@@ -1,8 +1,10 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { memoryStore } from "../lib/memory-store";
+import { ownerOnly } from "../lib/owner-gate";
 
 export default defineTool({
+  approval: ownerOnly,
   description:
     "Save one long-term memory that persists across all future conversations. Use for durable facts and preferences about the user (name, city, habits, likes, ongoing projects). Phrase it entity-centric, e.g. 'Micky prefers metric units'. Never save secrets, passwords, tokens, or payment details.",
   inputSchema: z.object({
