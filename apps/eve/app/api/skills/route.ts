@@ -8,7 +8,7 @@ import { requireWebAuth } from "@/lib/web-auth";
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
 export async function GET(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   try {
     const skills = await skillStore.list();
@@ -19,7 +19,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function PUT(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as {
     name?: unknown;
@@ -49,7 +49,7 @@ export async function PUT(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { name?: unknown } | null;
   if (body === null || typeof body.name !== "string" || body.name.length === 0) {

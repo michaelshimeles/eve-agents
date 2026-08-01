@@ -1,5 +1,6 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
 import { memoryStore } from "../lib/memory-store";
+import { isSharedIMessageResolve } from "../lib/owner-gate";
 import { withTimeout } from "../lib/with-timeout";
 
 // A cold cache blocks the session's first model call on this fetch; cap the
@@ -16,7 +17,8 @@ function bulletList(items: string[]): string {
 // covers anything saved mid-conversation.
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    "session.started": async (_event, ctx) => {
+      if (isSharedIMessageResolve(ctx)) return null;
       let memoryBlock: string;
       try {
         const profile = await withTimeout(memoryStore.profile(), PROFILE_TIMEOUT_MS, "Memory profile");

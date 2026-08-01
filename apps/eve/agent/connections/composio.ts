@@ -1,5 +1,7 @@
 import { defineMcpClientConnection } from "eve/connections";
 
+import { ownerOnly } from "../lib/owner-gate";
+
 // Composio Connect: one MCP server fronting 1000+ apps (Gmail, Google
 // Calendar, Notion, Slack, GitHub, Linear, ...). It exposes meta-tools to
 // discover app tools, authorize apps, and execute actions. When an app is
@@ -12,4 +14,7 @@ export default defineMcpClientConnection({
   headers: {
     "x-consumer-api-key": () => process.env.COMPOSIO_API_KEY!,
   },
+  // These are the owner's connected accounts; owner-only in code, not just
+  // in instructions (iMessage-group guest turns are denied outright).
+  approval: ownerOnly,
 });
