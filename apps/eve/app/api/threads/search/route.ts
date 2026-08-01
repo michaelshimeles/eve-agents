@@ -6,7 +6,7 @@ import { requireWebAuth } from "@/lib/web-auth";
 // conversations are findable by what was said, not just their titles.
 
 export async function GET(request: Request): Promise<Response> {
-  const denied = requireWebAuth(request);
+  const denied = await requireWebAuth(request);
   if (denied) return denied;
 
   const query = new URL(request.url).searchParams.get("q")?.trim() ?? "";
