@@ -1,8 +1,8 @@
 import { BuilderWizard } from "@/components/wizard";
 
-// Legacy `?update=<project>` deep links are redirected to /update by a
-// config-level redirect, which keeps this route free of request data so it
-// prerenders and navigations to it are instant.
+// Legacy `?update=<project>` deep links are redirected to /update in
+// proxy.ts, which keeps this route free of request data so it prerenders and
+// navigations to it are instant.
 export default function HomePage() {
   return (
     <main className="min-h-dvh">

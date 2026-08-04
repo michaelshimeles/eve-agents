@@ -28,16 +28,6 @@ const nextConfig: NextConfig = {
   // reusable shell per route instead of one payload per link.
   cacheComponents: true,
   partialPrefetching: true,
-  // Older agent banners deep-linked to /?update=<project>. Redirecting here
-  // (instead of in the page) keeps `/` free of searchParams access.
-  redirects: async () => [
-    {
-      source: "/",
-      has: [{ type: "query", key: "update", value: "(?<project>.+)" }],
-      destination: "/update?project=:project",
-      permanent: false,
-    },
-  ],
   outputFileTracingRoot: path.join(import.meta.dirname, "../.."),
   outputFileTracingIncludes: Object.fromEntries(
     TEMPLATE_ROUTES.map((route) => [route, templateIncludes]),
