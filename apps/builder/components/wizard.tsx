@@ -23,7 +23,7 @@ import {
   TriangleAlert,
   Trash2,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   requiredKeys,
@@ -178,7 +178,12 @@ export function BuilderWizard() {
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramBotUsername, setTelegramBotUsername] = useState("");
   const [telegramAllowedIds, setTelegramAllowedIds] = useState("");
-  const webhookSecretRef = useRef<string>(crypto.randomUUID().replaceAll("-", ""));
+  // Generated after mount rather than during render: an unstable value read
+  // while rendering would be baked into the route's prerendered shell.
+  const [webhookSecret, setWebhookSecret] = useState("");
+  useEffect(() => {
+    setWebhookSecret((current) => current || crypto.randomUUID().replaceAll("-", ""));
+  }, []);
 
   // Step 5: schedules
   const [schedules, setSchedules] = useState<CustomSchedule[]>([]);
@@ -235,7 +240,7 @@ export function BuilderWizard() {
         ? {
             botToken: telegramBotToken,
             botUsername: telegramBotUsername,
-            webhookSecret: webhookSecretRef.current,
+            webhookSecret,
             allowedUserIds: telegramAllowedIds,
           }
         : null,
@@ -259,6 +264,7 @@ export function BuilderWizard() {
       telegramBotToken,
       telegramBotUsername,
       telegramAllowedIds,
+      webhookSecret,
       schedules,
       postgresChoice,
       databaseUrl,
@@ -434,7 +440,7 @@ export function BuilderWizard() {
                 teamId,
                 deploymentId,
                 telegram: telegramEnabled
-                  ? { botToken: telegramBotToken.trim(), webhookSecret: webhookSecretRef.current }
+                  ? { botToken: telegramBotToken.trim(), webhookSecret }
                   : null,
               }),
             })

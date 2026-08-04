@@ -1,20 +1,9 @@
-import { redirect } from "next/navigation";
-
 import { BuilderWizard } from "@/components/wizard";
 
-export default async function HomePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ update?: string }>;
-}) {
-  const params = await searchParams;
-  // Older agent banners deep-linked here with ?update=<project>. Send them
-  // to the dedicated update page.
-  const legacy = params.update?.trim();
-  if (legacy !== undefined && legacy.length > 0) {
-    redirect(`/update?project=${encodeURIComponent(legacy)}`);
-  }
-
+// Legacy `?update=<project>` deep links are redirected to /update in
+// proxy.ts, which keeps this route free of request data so it prerenders and
+// navigations to it are instant.
+export default function HomePage() {
   return (
     <main className="min-h-dvh">
       <header className="border-b border-gray-a4">

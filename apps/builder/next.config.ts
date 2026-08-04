@@ -23,6 +23,11 @@ const templateExcludes = [
 ];
 
 const nextConfig: NextConfig = {
+  // Instant Navigations (Next 16.3): dynamic data must stream inside a
+  // Suspense boundary or be wrapped in `use cache`, and links prefetch one
+  // reusable shell per route instead of one payload per link.
+  cacheComponents: true,
+  partialPrefetching: true,
   outputFileTracingRoot: path.join(import.meta.dirname, "../.."),
   outputFileTracingIncludes: Object.fromEntries(
     TEMPLATE_ROUTES.map((route) => [route, templateIncludes]),
